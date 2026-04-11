@@ -119,7 +119,7 @@ final List<Ilac> ornekIlaclar = [
     saat: '18:00',
     durum: IlacDurumu.yakinda,
     tur: IlacTuru.kapsul,
-    renk: Color(0xFFAB7AEB),
+    renk: Color(0xFF8B2FE8),
     not: '',
     kalanAdet: 45,
     toplamAdet: 60,

@@ -58,13 +58,13 @@ class AppTheme {
 class AppShadow {
   static List<BoxShadow> get card => [
         BoxShadow(
-          color: const Color(0xFF4A90E2).withOpacity(0.06),
+          color: const Color(0xFF4A90E2).withValues(alpha: 0.06),
           blurRadius: 20,
           offset: const Offset(0, 4),
           spreadRadius: 0,
         ),
         BoxShadow(
-          color: Colors.black.withOpacity(0.04),
+          color: Colors.black.withValues(alpha: 0.04),
           blurRadius: 8,
           offset: const Offset(0, 2),
           spreadRadius: 0,
@@ -73,7 +73,7 @@ class AppShadow {
 
   static List<BoxShadow> get soft => [
         BoxShadow(
-          color: Colors.black.withOpacity(0.06),
+          color: Colors.black.withValues(alpha: 0.06),
           blurRadius: 16,
           offset: const Offset(0, 4),
         ),

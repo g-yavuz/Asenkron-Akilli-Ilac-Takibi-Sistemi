@@ -59,7 +59,6 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.background,
-      floatingActionButton: _buildFAB(),
       body: SafeArea(
         child: CustomScrollView(
           slivers: [
@@ -67,7 +66,7 @@ class _HomeScreenState extends State<HomeScreen> {
             SliverToBoxAdapter(child: _buildOzetKartlar()),
             SliverToBoxAdapter(child: _buildIlaclarBaslik()),
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
               sliver: SliverList(
                 delegate: SliverChildBuilderDelegate(
                   (context, index) => _IlacKarti(
@@ -99,14 +98,14 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 Text(
                   _selamlama(),
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 15,
                     color: AppTheme.textSecondary,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
                 const SizedBox(height: 2),
-                const Text(
+                Text(
                   'Ahmet Yılmaz',
                   style: TextStyle(
                     fontSize: 26,
@@ -120,6 +119,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           _BildirimButonu(
             kritikSayisi: stokuBitenSayisi + atilanSayisi,
+            onTap: () => _bildirimGoster(),
           ),
         ],
       ),
@@ -175,7 +175,7 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          const Text(
+          Text(
             'İlaçlarım',
             style: TextStyle(
               fontSize: 22,
@@ -225,22 +225,27 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildFAB() {
-    return FloatingActionButton(
-      onPressed: () {},
-      backgroundColor: AppTheme.primary,
-      elevation: 4,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: const Icon(Icons.add_rounded, color: Colors.white, size: 28),
-    );
-  }
-
   void _detayGoster(Ilac ilac) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => _IlacDetaySheet(ilac: ilac),
+    );
+  }
+
+  void _bildirimGoster() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _BildirimSheet(
+        ilaclar: ilaclar,
+        onIlacTap: (ilac) {
+          Navigator.pop(context);
+          _detayGoster(ilac);
+        },
+      ),
     );
   }
 }
@@ -310,7 +315,7 @@ class _OzetKarti extends StatelessWidget {
           const SizedBox(height: 2),
           Text(
             baslik,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w700,
               color: AppTheme.textPrimary,
@@ -400,7 +405,7 @@ class _UyumKarti extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 4),
-          const Text(
+          Text(
             'Kullanım Düzeni',
             style: TextStyle(
               fontSize: 12,
@@ -418,38 +423,42 @@ class _UyumKarti extends StatelessWidget {
 
 class _BildirimButonu extends StatelessWidget {
   final int kritikSayisi;
-  const _BildirimButonu({required this.kritikSayisi});
+  final VoidCallback onTap;
+  const _BildirimButonu({required this.kritikSayisi, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        Container(
-          width: 46,
-          height: 46,
-          decoration: BoxDecoration(
-            color: AppTheme.cardBackground,
-            borderRadius: BorderRadius.circular(14),
-            boxShadow: AppShadow.card,
+    return GestureDetector(
+      onTap: onTap,
+      child: Stack(
+        children: [
+          Container(
+            width: 46,
+            height: 46,
+            decoration: BoxDecoration(
+              color: AppTheme.cardBackground,
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: AppShadow.card,
+            ),
+            child: Icon(Icons.notifications_none_rounded,
+                color: AppTheme.textPrimary, size: 22),
           ),
-          child: const Icon(Icons.notifications_none_rounded,
-              color: AppTheme.textPrimary, size: 22),
-        ),
-        if (kritikSayisi > 0)
-          Positioned(
-            right: 8,
-            top: 8,
-            child: Container(
-              width: 10,
-              height: 10,
-              decoration: BoxDecoration(
-                color: AppTheme.critical,
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 1.5),
+          if (kritikSayisi > 0)
+            Positioned(
+              right: 8,
+              top: 8,
+              child: Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  color: AppTheme.critical,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 1.5),
+                ),
               ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -471,12 +480,22 @@ class _IlacKarti extends StatelessWidget {
   Color get _kartBgRenk {
     if (ilac.bitti) return const Color(0xFFFFF5F5);
     if (ilac.azKaldi) return const Color(0xFFFFFAEE);
+    if (ilac.durum == IlacDurumu.yakinda ||
+        ilac.durum == IlacDurumu.alindi ||
+        ilac.durum == IlacDurumu.bekliyor) {
+      return ilac.renk.withValues(alpha: 0.03);
+    }
     return AppTheme.cardBackground;
   }
 
   Color? get _kartBorderRenk {
     if (ilac.bitti) return const Color(0xFFFFD0D0);
     if (ilac.azKaldi) return const Color(0xFFFFDFA0);
+    if (ilac.durum == IlacDurumu.yakinda ||
+        ilac.durum == IlacDurumu.alindi ||
+        ilac.durum == IlacDurumu.bekliyor) {
+      return ilac.renk.withValues(alpha: 0.18);
+    }
     return null;
   }
 
@@ -504,6 +523,22 @@ class _IlacKarti extends StatelessWidget {
         ),
         BoxShadow(
           color: AppTheme.warning.withValues(alpha: 0.06),
+          blurRadius: 6,
+          offset: const Offset(0, 2),
+        ),
+      ];
+    }
+    if (ilac.durum == IlacDurumu.yakinda ||
+        ilac.durum == IlacDurumu.alindi ||
+        ilac.durum == IlacDurumu.bekliyor) {
+      return [
+        BoxShadow(
+          color: ilac.renk.withValues(alpha: 0.08),
+          blurRadius: 20,
+          offset: const Offset(0, 5),
+        ),
+        BoxShadow(
+          color: ilac.renk.withValues(alpha: 0.03),
           blurRadius: 6,
           offset: const Offset(0, 2),
         ),
@@ -548,7 +583,7 @@ class _IlacKarti extends StatelessWidget {
                             Expanded(
                               child: Text(
                                 ilac.ad,
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 19,
                                   fontWeight: FontWeight.w800,
                                   color: AppTheme.textPrimary,
@@ -564,7 +599,7 @@ class _IlacKarti extends StatelessWidget {
                         // Kullanım bilgisi
                         Text(
                           ilac.kullanimBilgisi,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 15,
                             color: AppTheme.textSecondary,
                             fontWeight: FontWeight.w500,
@@ -619,8 +654,8 @@ class _IlacIkonu extends StatelessWidget {
   }
 
   Color get _bgRenk {
-    if (ilac.bitti) return const Color(0xFFFFDFDF);
-    if (ilac.azKaldi) return const Color(0xFFFFECC4);
+    if (ilac.bitti) return const Color(0xFFFFD0D0);
+    if (ilac.azKaldi) return const Color(0xFFFFDFA0);
     return ilac.renk.withValues(alpha: 0.12);
   }
 
@@ -664,14 +699,14 @@ class _DurumBadge extends StatelessWidget {
     } else {
       switch (ilac.durum) {
         case IlacDurumu.alindi:
-          renk = AppTheme.success;
-          bgRenk = AppTheme.successLight;
+          renk = ilac.renk;
+          bgRenk = ilac.renk.withValues(alpha: 0.10);
           metin = 'Alındı';
           ikon = Icons.check_circle_outline_rounded;
           break;
         case IlacDurumu.bekliyor:
-          renk = AppTheme.warning;
-          bgRenk = AppTheme.warningLight;
+          renk = ilac.renk;
+          bgRenk = ilac.renk.withValues(alpha: 0.10);
           metin = 'Bekliyor';
           ikon = Icons.schedule_rounded;
           break;
@@ -682,8 +717,8 @@ class _DurumBadge extends StatelessWidget {
           ikon = Icons.cancel_outlined;
           break;
         case IlacDurumu.yakinda:
-          renk = AppTheme.textSecondary;
-          bgRenk = AppTheme.divider;
+          renk = ilac.renk;
+          bgRenk = ilac.renk.withValues(alpha: 0.10);
           metin = 'Yakında';
           ikon = Icons.access_time_rounded;
           break;
@@ -763,7 +798,7 @@ class _ZamanChip extends StatelessWidget {
           const SizedBox(width: 5),
           Text(
             '$_metin · $saat',
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 14,
               color: AppTheme.textPrimary,
               fontWeight: FontWeight.w600,
@@ -959,7 +994,7 @@ class _IlacDetaySheet extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(24),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: AppTheme.cardBackground,
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -996,7 +1031,7 @@ class _IlacDetaySheet extends StatelessWidget {
                 children: [
                   Text(
                     ilac.ad,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.w800,
                       color: AppTheme.textPrimary,
@@ -1004,7 +1039,7 @@ class _IlacDetaySheet extends StatelessWidget {
                   ),
                   Text(
                     ilac.doz,
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontSize: 14, color: AppTheme.textSecondary),
                   ),
                 ],
@@ -1043,7 +1078,7 @@ class _IlacDetaySheet extends StatelessWidget {
                   const SizedBox(width: 8),
                   Text(
                     ilac.not,
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontSize: 13, color: AppTheme.textSecondary),
                   ),
                 ],
@@ -1100,11 +1135,11 @@ class _DetayRow extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(baslik,
-                style: const TextStyle(
+                style: TextStyle(
                     fontSize: 11, color: AppTheme.textSecondary)),
             Text(
               deger,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 15,
                 fontWeight: FontWeight.w700,
                 color: AppTheme.textPrimary,
@@ -1115,4 +1150,265 @@ class _DetayRow extends StatelessWidget {
       ],
     );
   }
+}
+
+// ─── BİLDİRİM SAYFASI ────────────────────────────────────────────────────────
+
+class _BildirimSheet extends StatelessWidget {
+  final List<Ilac> ilaclar;
+  final void Function(Ilac) onIlacTap;
+  const _BildirimSheet({required this.ilaclar, required this.onIlacTap});
+
+  List<_Bildirim> get _bildirimler {
+    final liste = <_Bildirim>[];
+
+    for (final ilac in ilaclar) {
+      if (ilac.durum == IlacDurumu.atildi) {
+        liste.add(_Bildirim(
+          ilac: ilac,
+          baslik: 'Doz atlandı',
+          aciklama: '${ilac.ad} · ${ilac.saat} dozunu almadın',
+          ikon: Icons.cancel_outlined,
+          renk: AppTheme.critical,
+          bgRenk: AppTheme.criticalLight,
+          oncelik: 0,
+        ));
+      }
+      if (ilac.bitti) {
+        liste.add(_Bildirim(
+          ilac: ilac,
+          baslik: 'Stok tükendi',
+          aciklama: '${ilac.ad} için ilaç kalmadı, eczaneden temin edin',
+          ikon: Icons.medication_outlined,
+          renk: AppTheme.critical,
+          bgRenk: AppTheme.criticalLight,
+          oncelik: 1,
+        ));
+      } else if (ilac.azKaldi) {
+        liste.add(_Bildirim(
+          ilac: ilac,
+          baslik: 'Stok azalıyor',
+          aciklama: '${ilac.ad} için yalnızca ${ilac.kalanAdet} ${ilac.birim} kaldı',
+          ikon: Icons.warning_amber_rounded,
+          renk: AppTheme.warning,
+          bgRenk: AppTheme.warningLight,
+          oncelik: 2,
+        ));
+      }
+      if (ilac.durum == IlacDurumu.bekliyor) {
+        liste.add(_Bildirim(
+          ilac: ilac,
+          baslik: 'Almanın zamanı',
+          aciklama: '${ilac.ad} · ${ilac.saat} dozunu almayı unutma',
+          ikon: Icons.schedule_rounded,
+          renk: ilac.renk,
+          bgRenk: ilac.renk.withValues(alpha: 0.10),
+          oncelik: 3,
+        ));
+      }
+      if (ilac.durum == IlacDurumu.yakinda) {
+        liste.add(_Bildirim(
+          ilac: ilac,
+          baslik: 'Yakında alınacak',
+          aciklama: '${ilac.ad} · ${ilac.saat} saatinde hatırlatılacak',
+          ikon: Icons.access_time_rounded,
+          renk: ilac.renk,
+          bgRenk: ilac.renk.withValues(alpha: 0.10),
+          oncelik: 4,
+        ));
+      }
+    }
+
+    liste.sort((a, b) => a.oncelik.compareTo(b.oncelik));
+    return liste;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bildirimler = _bildirimler;
+
+    return Container(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.88,
+      ),
+      decoration: BoxDecoration(
+        color: AppTheme.cardBackground,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 12, bottom: 4),
+            child: Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppTheme.divider,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+            child: Row(
+              children: [
+                Text(
+                  'Bildirimler',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                    color: AppTheme.textPrimary,
+                    letterSpacing: -0.4,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (bildirimler.isNotEmpty)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: AppTheme.critical.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      '${bildirimler.length}',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.critical,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          if (bildirimler.isEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 40),
+              child: Column(
+                children: [
+                  Container(
+                    width: 64,
+                    height: 64,
+                    decoration: BoxDecoration(
+                      color: AppTheme.successLight,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.check_rounded,
+                        color: AppTheme.success, size: 32),
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    'Her şey yolunda!',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Şu an için bekleyen bildirim yok.',
+                    style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+                  ),
+                ],
+              ),
+            )
+          else
+            Flexible(
+              child: ListView.separated(
+                shrinkWrap: true,
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),
+                itemCount: bildirimler.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 10),
+                itemBuilder: (context, index) {
+                  final b = bildirimler[index];
+                  return GestureDetector(
+                    onTap: () => onIlacTap(b.ilac),
+                    child: Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: b.bgRenk,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: b.renk.withValues(alpha: 0.18),
+                          width: 1,
+                        ),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Container(
+                            width: 38,
+                            height: 38,
+                            decoration: BoxDecoration(
+                              color: b.renk.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(11),
+                            ),
+                            child: Icon(b.ikon, color: b.renk, size: 18),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  b.baslik,
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w700,
+                                    color: b.renk,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  b.aciklama,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: AppTheme.textSecondary,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Icon(
+                            Icons.chevron_right_rounded,
+                            color: b.renk.withValues(alpha: 0.6),
+                            size: 20,
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Bildirim {
+  final Ilac ilac;
+  final String baslik;
+  final String aciklama;
+  final IconData ikon;
+  final Color renk;
+  final Color bgRenk;
+  final int oncelik;
+
+  const _Bildirim({
+    required this.ilac,
+    required this.baslik,
+    required this.aciklama,
+    required this.ikon,
+    required this.renk,
+    required this.bgRenk,
+    required this.oncelik,
+  });
 }

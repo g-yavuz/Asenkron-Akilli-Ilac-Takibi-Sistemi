@@ -42,11 +42,11 @@ class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
 
   List<Widget> get _screens => [
-    const HomeScreen(),
-    IlacEkleScreen(onIptal: () => setState(() => _currentIndex = 0)),
-    const PharmaciesScreen(),
-    const ProfileScreen(),
-  ];
+        const HomeScreen(),
+        IlacEkleScreen(onIptal: () => setState(() => _currentIndex = 0)),
+        const PharmaciesScreen(),
+        const ProfileScreen(),
+      ];
 
   @override
   Widget build(BuildContext context) {
@@ -65,7 +65,7 @@ class _MainShellState extends State<MainShell> {
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             blurRadius: 20,
             offset: const Offset(0, -4),
           ),
@@ -144,7 +144,7 @@ class _NavItem extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
           decoration: BoxDecoration(
             color: isActive
-                ? AppTheme.primary.withOpacity(0.1)
+                ? AppTheme.primary.withValues(alpha: 0.1)
                 : Colors.transparent,
             borderRadius: BorderRadius.circular(14),
           ),
@@ -165,10 +165,8 @@ class _NavItem extends StatelessWidget {
                 duration: const Duration(milliseconds: 200),
                 style: TextStyle(
                   fontSize: 11,
-                  fontWeight:
-                      isActive ? FontWeight.w700 : FontWeight.w400,
-                  color:
-                      isActive ? AppTheme.primary : AppTheme.textSecondary,
+                  fontWeight: isActive ? FontWeight.w700 : FontWeight.w400,
+                  color: isActive ? AppTheme.primary : AppTheme.textSecondary,
                 ),
                 child: Text(label),
               ),
