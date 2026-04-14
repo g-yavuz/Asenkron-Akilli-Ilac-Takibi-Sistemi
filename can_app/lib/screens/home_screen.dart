@@ -58,70 +58,90 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.background,
-      body: SafeArea(
-        child: CustomScrollView(
-          slivers: [
-            SliverToBoxAdapter(child: _buildUstBaslik()),
-            SliverToBoxAdapter(child: _buildOzetKartlar()),
-            SliverToBoxAdapter(child: _buildIlaclarBaslik()),
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-              sliver: SliverList(
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) => _IlacKarti(
-                    ilac: ilaclar[index],
-                    onAl: ilaclar[index].durum == IlacDurumu.bekliyor
-                        ? () => _ilacAl(ilaclar[index].id)
-                        : null,
-                    onDetay: () => _detayGoster(ilaclar[index]),
+      backgroundColor: const Color(0xFF3B6CF6),
+      body: CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(child: _buildUstBaslik()),
+          SliverToBoxAdapter(
+            child: Container(
+              color: AppTheme.background,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildOzetKartlar(),
+                  _buildIlaclarBaslik(),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
+                    child: Column(
+                      children: ilaclar
+                          .map((ilac) => _IlacKarti(
+                                ilac: ilac,
+                                onAl: ilac.durum == IlacDurumu.bekliyor
+                                    ? () => _ilacAl(ilac.id)
+                                    : null,
+                                onDetay: () => _detayGoster(ilac),
+                              ))
+                          .toList(),
+                    ),
                   ),
-                  childCount: ilaclar.length,
-                ),
+                ],
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
   // ── Üst başlık ────────────────────────────────────────────────────────────
   Widget _buildUstBaslik() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _selamlama(),
-                  style: TextStyle(
-                    fontSize: 15,
-                    color: AppTheme.textSecondary,
-                    fontWeight: FontWeight.w500,
-                  ),
+    return Container(
+      width: double.infinity,
+      decoration: const BoxDecoration(
+        color: Color(0xFF3B6CF6),
+        borderRadius: BorderRadius.only(
+          bottomLeft: Radius.circular(28),
+          bottomRight: Radius.circular(28),
+        ),
+      ),
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 20, 20, 24),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _selamlama(),
+                      style: const TextStyle(
+                        fontSize: 15,
+                        color: Colors.white70,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'Ahmet Yılmaz',
+                      style: TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                        letterSpacing: -0.5,
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  'Ahmet Yılmaz',
-                  style: TextStyle(
-                    fontSize: 26,
-                    fontWeight: FontWeight.w800,
-                    color: AppTheme.textPrimary,
-                    letterSpacing: -0.5,
-                  ),
-                ),
-              ],
-            ),
+              ),
+              _BildirimButonu(
+                kritikSayisi: stokuBitenSayisi + atilanSayisi,
+                onTap: () => _bildirimGoster(),
+              ),
+            ],
           ),
-          _BildirimButonu(
-            kritikSayisi: stokuBitenSayisi + atilanSayisi,
-            onTap: () => _bildirimGoster(),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -436,12 +456,15 @@ class _BildirimButonu extends StatelessWidget {
             width: 46,
             height: 46,
             decoration: BoxDecoration(
-              color: AppTheme.cardBackground,
+              color: Colors.white.withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(14),
-              boxShadow: AppShadow.card,
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.3),
+                width: 1,
+              ),
             ),
-            child: Icon(Icons.notifications_none_rounded,
-                color: AppTheme.textPrimary, size: 22),
+            child: const Icon(Icons.notifications_none_rounded,
+                color: Colors.white, size: 22),
           ),
           if (kritikSayisi > 0)
             Positioned(

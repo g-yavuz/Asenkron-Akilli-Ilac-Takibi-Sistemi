@@ -41,6 +41,10 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Yakınındaki eczaneleri göstermek için konumunuza ihtiyaç duyuyoruz.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Yakınındaki eczaneleri göstermek için konumunuza ihtiyaç duyuyoruz.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>

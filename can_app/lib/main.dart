@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'theme.dart';
@@ -11,7 +12,8 @@ void main() {
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.dark,
+      statusBarIconBrightness: Brightness.light,
+      statusBarBrightness: Brightness.dark,
     ),
   );
   runApp(const MedTrackerApp());
@@ -51,6 +53,7 @@ class _MainShellState extends State<MainShell> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      extendBody: true,
       body: IndexedStack(
         index: _currentIndex,
         children: _screens,
@@ -60,51 +63,57 @@ class _MainShellState extends State<MainShell> {
   }
 
   Widget _buildBottomNav() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 20,
-            offset: const Offset(0, -4),
+    return ClipRect(
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.72),
+            border: Border(
+              top: BorderSide(
+                color: Colors.white.withValues(alpha: 0.5),
+                width: 0.5,
+              ),
+            ),
           ),
-        ],
-      ),
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-          child: Row(
-            children: [
-              _NavItem(
-                icon: Icons.home_outlined,
-                activeIcon: Icons.home_rounded,
-                label: 'Ana Sayfa',
-                isActive: _currentIndex == 0,
-                onTap: () => _onNavTap(0),
+          child: SafeArea(
+            top: false,
+            bottom: false,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(8, 6, 8, MediaQuery.of(context).padding.bottom > 0 ? 12 : 8),
+              child: Row(
+                children: [
+                  _NavItem(
+                    icon: Icons.home_outlined,
+                    activeIcon: Icons.home_rounded,
+                    label: 'Ana Sayfa',
+                    isActive: _currentIndex == 0,
+                    onTap: () => _onNavTap(0),
+                  ),
+                  _NavItem(
+                    icon: Icons.add_circle_outline_rounded,
+                    activeIcon: Icons.add_circle_rounded,
+                    label: 'İlaç Ekle',
+                    isActive: _currentIndex == 1,
+                    onTap: () => _onNavTap(1),
+                  ),
+                  _NavItem(
+                    icon: Icons.local_pharmacy_outlined,
+                    activeIcon: Icons.local_pharmacy_rounded,
+                    label: 'Eczaneler',
+                    isActive: _currentIndex == 2,
+                    onTap: () => _onNavTap(2),
+                  ),
+                  _NavItem(
+                    icon: Icons.person_outline_rounded,
+                    activeIcon: Icons.person_rounded,
+                    label: 'Profil',
+                    isActive: _currentIndex == 3,
+                    onTap: () => _onNavTap(3),
+                  ),
+                ],
               ),
-              _NavItem(
-                icon: Icons.add_circle_outline_rounded,
-                activeIcon: Icons.add_circle_rounded,
-                label: 'İlaç Ekle',
-                isActive: _currentIndex == 1,
-                onTap: () => _onNavTap(1),
-              ),
-              _NavItem(
-                icon: Icons.local_pharmacy_outlined,
-                activeIcon: Icons.local_pharmacy_rounded,
-                label: 'Eczaneler',
-                isActive: _currentIndex == 2,
-                onTap: () => _onNavTap(2),
-              ),
-              _NavItem(
-                icon: Icons.person_outline_rounded,
-                activeIcon: Icons.person_rounded,
-                label: 'Profil',
-                isActive: _currentIndex == 3,
-                onTap: () => _onNavTap(3),
-              ),
-            ],
+            ),
           ),
         ),
       ),
