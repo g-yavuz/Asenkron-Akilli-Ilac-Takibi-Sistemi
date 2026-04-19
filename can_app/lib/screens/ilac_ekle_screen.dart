@@ -1,12 +1,10 @@
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../theme.dart';
-// ─── SCAN DURUMU ─────────────────────────────────────────────────────────────
 
-enum _ScanDurumu { taraniyor, isleniyor, bulundu, bulunamadi, manuelForm }
-
-// ─── ÖRNEK VERİTABANI ────────────────────────────────────────────────────────
+// ─── VERİTABANI ──────────────────────────────────────────────────────────────
 
 const _ilacVetabani = {
   '4987654321098': {
@@ -29,6 +27,10 @@ const _ilacVetabani = {
   },
 };
 
+// ─── DURUM ───────────────────────────────────────────────────────────────────
+
+enum _ScanDurumu { taraniyor, isleniyor }
+
 // ─── ANA EKRAN ────────────────────────────────────────────────────────────────
 
 class IlacEkleScreen extends StatefulWidget {
@@ -42,17 +44,14 @@ class IlacEkleScreen extends StatefulWidget {
 class _IlacEkleScreenState extends State<IlacEkleScreen>
     with TickerProviderStateMixin {
   _ScanDurumu _durum = _ScanDurumu.taraniyor;
-  bool _flashAcik = false;
-  Map<String, String>? _bulunanIlac;
+  final MobileScannerController _kameraCtrl = MobileScannerController(
+    detectionSpeed: DetectionSpeed.normal,
+    facing: CameraFacing.back,
+  );
+  bool _islemde = false;
 
-  // Scan çizgisi animasyonu
   late final AnimationController _scanCtrl;
   late final Animation<double> _scanAnim;
-
-  // İşleniyor dönme animasyonu
-  late final AnimationController _spinCtrl;
-
-  // Köşe işima animasyonu
   late final AnimationController _pulseCtrl;
   late final Animation<double> _pulseAnim;
 
@@ -65,11 +64,6 @@ class _IlacEkleScreenState extends State<IlacEkleScreen>
     )..repeat(reverse: true);
     _scanAnim = CurvedAnimation(parent: _scanCtrl, curve: Curves.easeInOut);
 
-    _spinCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 900),
-    );
-
     _pulseCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1500),
@@ -81,45 +75,40 @@ class _IlacEkleScreenState extends State<IlacEkleScreen>
 
   @override
   void dispose() {
+    _kameraCtrl.dispose();
     _scanCtrl.dispose();
-    _spinCtrl.dispose();
     _pulseCtrl.dispose();
     super.dispose();
   }
 
-  // ── DEMO: barkod tarama simülasyonu ──────────────────────────────────────
-  void _barkodTarandiSimule(String barkod) {
+  void _barkodTarandi(BarcodeCapture capture) {
+    if (_islemde || _durum != _ScanDurumu.taraniyor) return;
+    final barkod = capture.barcodes.firstOrNull?.rawValue;
+    if (barkod == null || barkod.isEmpty) return;
+
+    _islemde = true;
     HapticFeedback.mediumImpact();
+    _kameraCtrl.stop();
     setState(() => _durum = _ScanDurumu.isleniyor);
-    _scanCtrl.stop();
-    _spinCtrl.repeat();
 
-    Future.delayed(const Duration(milliseconds: 1200), () {
+    Future.delayed(const Duration(milliseconds: 900), () {
       if (!mounted) return;
-      _spinCtrl.stop();
+      setState(() => _durum = _ScanDurumu.taraniyor);
       final ilac = _ilacVetabani[barkod];
-      setState(() {
-        _bulunanIlac = ilac;
-        _durum = ilac != null ? _ScanDurumu.bulundu : _ScanDurumu.bulunamadi;
-      });
-
       if (ilac != null) {
         _bulunduModalGoster(ilac);
       } else {
-        _bulunamadiModalGoster();
+        _bulunamadiModalGoster(barkod);
       }
     });
   }
 
   void _taramayaGeriDon() {
-    setState(() {
-      _durum = _ScanDurumu.taraniyor;
-      _bulunanIlac = null;
-    });
-    _scanCtrl.repeat(reverse: true);
+    _islemde = false;
+    _kameraCtrl.start();
+    setState(() => _durum = _ScanDurumu.taraniyor);
   }
 
-  // ── MODALLER ─────────────────────────────────────────────────────────────
   void _bulunduModalGoster(Map<String, String> ilac) {
     showModalBottomSheet(
       context: context,
@@ -128,9 +117,9 @@ class _IlacEkleScreenState extends State<IlacEkleScreen>
       isDismissible: false,
       builder: (_) => _BulunduModal(
         ilac: ilac,
-        onOnayla: () {
+        onDevamEt: () {
           Navigator.pop(context);
-          _basariliGoster();
+          _dozAyarlariAc(ilac);
         },
         onIptal: () {
           Navigator.pop(context);
@@ -140,36 +129,22 @@ class _IlacEkleScreenState extends State<IlacEkleScreen>
     );
   }
 
-  void _bulunamadiModalGoster() {
+  void _bulunamadiModalGoster(String barkod) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       isDismissible: false,
       builder: (_) => _BulunamadiModal(
-        onKaydet: () {
+        barkod: barkod,
+        onManuelDevam: () {
           Navigator.pop(context);
-          _basariliGoster();
+          _dozAyarlariAc(null);
         },
         onIptal: () {
           Navigator.pop(context);
           _taramayaGeriDon();
         },
-      ),
-    );
-  }
-
-  void _manuelFormGoster() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _ManuelFormModal(
-        onKaydet: () {
-          Navigator.pop(context);
-          _basariliGoster();
-        },
-        onIptal: () => Navigator.pop(context),
       ),
     );
   }
@@ -182,9 +157,39 @@ class _IlacEkleScreenState extends State<IlacEkleScreen>
       builder: (_) => _QrManuelModal(
         onSorgula: (barkod) {
           Navigator.pop(context);
-          _barkodTarandiSimule(barkod);
+          _kameraCtrl.stop();
+          setState(() => _durum = _ScanDurumu.isleniyor);
+          Future.delayed(const Duration(milliseconds: 900), () {
+            if (!mounted) return;
+            setState(() => _durum = _ScanDurumu.taraniyor);
+            final ilac = _ilacVetabani[barkod];
+            if (ilac != null) {
+              _bulunduModalGoster(ilac);
+            } else {
+              _bulunamadiModalGoster(barkod);
+            }
+          });
         },
         onIptal: () => Navigator.pop(context),
+      ),
+    );
+  }
+
+  void _dozAyarlariAc(Map<String, String>? ilac) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => DozAyarlariSayfasi(
+          ilacBilgisi: ilac,
+          onKaydet: () {
+            Navigator.pop(context);
+            _basariliGoster();
+          },
+          onIptal: () {
+            Navigator.pop(context);
+            _taramayaGeriDon();
+          },
+        ),
       ),
     );
   }
@@ -197,16 +202,15 @@ class _IlacEkleScreenState extends State<IlacEkleScreen>
             Icon(Icons.check_circle_outline_rounded,
                 color: Colors.white, size: 18),
             SizedBox(width: 10),
-            Text(
-              'İlaç başarıyla eklendi!',
-              style:
-                  TextStyle(fontWeight: FontWeight.w600, color: Colors.white),
-            ),
+            Text('İlaç başarıyla eklendi!',
+                style: TextStyle(
+                    fontWeight: FontWeight.w600, color: Colors.white)),
           ],
         ),
         backgroundColor: AppTheme.success,
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         duration: const Duration(seconds: 2),
       ),
@@ -214,123 +218,122 @@ class _IlacEkleScreenState extends State<IlacEkleScreen>
     _taramayaGeriDon();
   }
 
-  // ── BUILD ─────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    final screenH = MediaQuery.of(context).size.height;
-    final cameraH = screenH * 0.75;
-
     return Scaffold(
       backgroundColor: Colors.black,
-      body: Stack(
+      body: Column(
         children: [
-          // ── Kamera Alani (75%) ──────────────────────────────────────────
-          SizedBox(
-            height: cameraH,
-            width: double.infinity,
+          // ── Kamera Alanı (flex 3) ────────────────────────────────────────
+          Expanded(
+            flex: 3,
             child: Stack(
+              fit: StackFit.expand,
               children: [
-                // Kamera arka plani
-                _KameraArkaplan(durum: _durum),
+                MobileScanner(
+                  controller: _kameraCtrl,
+                  onDetect: _barkodTarandi,
+                  errorBuilder: (ctx, error) => _IzinEkrani(
+                    reddedildi: error.errorCode ==
+                        MobileScannerErrorCode.permissionDenied,
+                    onTekrarIste: () => _kameraCtrl.start(),
+                  ),
+                ),
 
-                // Karartma overlay + scan frame
                 _ScanOverlay(
                   scanAnim: _scanAnim,
                   pulseAnim: _pulseAnim,
-                  durum: _durum,
-                  spinCtrl: _spinCtrl,
+                  yukleniyor: _durum == _ScanDurumu.isleniyor,
                 ),
 
-                // Üst kontroller
                 _UstKontroller(
-                  flashAcik: _flashAcik,
-                  onFlash: () =>
-                      setState(() => _flashAcik = !_flashAcik),
+                  flashDestegi: _durum == _ScanDurumu.taraniyor,
+                  onFlash: () => _kameraCtrl.toggleTorch(),
                   onIptal: widget.onIptal,
                 ),
 
-                // Kamera alanı alt butonlar
-                _DemoButonlar(
-                  durum: _durum,
-                  onQrManuel: _qrManuelGir,
-                  onManuelEkle: _bulunamadiModalGoster,
-                ),
+                if (_durum == _ScanDurumu.taraniyor)
+                  _AltButonlar(
+                    onQrManuel: _qrManuelGir,
+                    onManuelEkle: () => _dozAyarlariAc(null),
+                  ),
               ],
             ),
           ),
 
-          // ── Alt Panel (25%) ──────────────────────────────────────────────
-          Positioned(
-            top: cameraH,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: _AltPanel(
-              onManuelGir: _manuelFormGoster,
-            ),
-          ),
+          // ── Alt Panel ───────────────────────────────────────────────────
+          _AltPanel(),
         ],
       ),
     );
   }
 }
 
-// ─── KAMERA ARKAPLAN ─────────────────────────────────────────────────────────
+// ─── İZİN EKRANI ─────────────────────────────────────────────────────────────
 
-class _KameraArkaplan extends StatelessWidget {
-  final _ScanDurumu durum;
-  const _KameraArkaplan({required this.durum});
+class _IzinEkrani extends StatelessWidget {
+  final bool reddedildi;
+  final VoidCallback onTekrarIste;
+  const _IzinEkrani({required this.reddedildi, required this.onTekrarIste});
 
   @override
   Widget build(BuildContext context) {
-    return CustomPaint(
-      size: Size(
-        MediaQuery.of(context).size.width,
-        MediaQuery.of(context).size.height * 0.75,
+    return Container(
+      color: const Color(0xFF0D1117),
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.camera_alt_outlined,
+                  color: AppTheme.primary, size: 34),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              reddedildi ? 'Kamera İzni Reddedildi' : 'Kamera İzni Gerekli',
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              reddedildi
+                  ? 'Ayarlardan kamera iznini açın'
+                  : 'Barkod taramak için izin verin',
+              style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.55), fontSize: 13),
+            ),
+            const SizedBox(height: 24),
+            GestureDetector(
+              onTap: reddedildi ? openAppSettings : onTekrarIste,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 24, vertical: 12),
+                decoration: BoxDecoration(
+                  color: AppTheme.primary,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Text(
+                  reddedildi ? 'Ayarlara Git' : 'İzin Ver',
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
-      painter: _KameraCizici(),
     );
   }
-}
-
-class _KameraCizici extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    // Koyu arka plan (kamera simülasyonu)
-    canvas.drawRect(
-      Rect.fromLTWH(0, 0, size.width, size.height),
-      Paint()..color = const Color(0xFF0D1117),
-    );
-
-    // Hafif grid doku
-    final gridPaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.03)
-      ..strokeWidth = 0.5;
-
-    const spacing = 24.0;
-    for (double x = 0; x < size.width; x += spacing) {
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridPaint);
-    }
-    for (double y = 0; y < size.height; y += spacing) {
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
-    }
-
-    // Vignette efekti (kenarlar daha koyu)
-    final vignette = Paint()
-      ..shader = RadialGradient(
-        center: Alignment.center,
-        radius: 0.85,
-        colors: [
-          Colors.transparent,
-          Colors.black.withValues(alpha: 0.6),
-        ],
-      ).createShader(Rect.fromLTWH(0, 0, size.width, size.height));
-    canvas.drawRect(
-        Rect.fromLTWH(0, 0, size.width, size.height), vignette);
-  }
-
-  @override
-  bool shouldRepaint(_) => false;
 }
 
 // ─── SCAN OVERLAY ─────────────────────────────────────────────────────────────
@@ -338,72 +341,43 @@ class _KameraCizici extends CustomPainter {
 class _ScanOverlay extends StatelessWidget {
   final Animation<double> scanAnim;
   final Animation<double> pulseAnim;
-  final _ScanDurumu durum;
-  final AnimationController spinCtrl;
+  final bool yukleniyor;
 
   const _ScanOverlay({
     required this.scanAnim,
     required this.pulseAnim,
-    required this.durum,
-    required this.spinCtrl,
+    required this.yukleniyor,
   });
 
   @override
   Widget build(BuildContext context) {
-    final w = MediaQuery.of(context).size.width;
-    final h = MediaQuery.of(context).size.height * 0.75;
-    const frameW = 260.0;
-    const frameH = 200.0;
-    final frameL = (w - frameW) / 2;
-    final frameT = (h - frameH) / 2 - 20;
+    return LayoutBuilder(builder: (context, constraints) {
+      final w = constraints.maxWidth;
+      final h = constraints.maxHeight;
+      const frameW = 260.0;
+      const frameH = 200.0;
+      final frameL = (w - frameW) / 2;
+      final frameT = (h - frameH) / 2 - 20;
 
-    return Stack(
-      children: [
-        // Karartilmiş kenar alanlar
-        CustomPaint(
-          size: Size(w, h),
-          painter: _OverlayCizici(
-            frameRect: Rect.fromLTWH(frameL, frameT, frameW, frameH),
+      return Stack(
+        children: [
+          CustomPaint(
+            size: Size(w, h),
+            painter: _OverlayCizici(
+                frameRect: Rect.fromLTWH(frameL, frameT, frameW, frameH)),
           ),
-        ),
-
-        // İşleniyor: dönüyor spinner
-        if (durum == _ScanDurumu.isleniyor)
+        if (yukleniyor)
           Positioned(
             left: frameL,
             top: frameT,
             width: frameW,
             height: frameH,
-            child: Center(
-              child: AnimatedBuilder(
-                animation: spinCtrl,
-                builder: (_, child) => Transform.rotate(
-                  angle: spinCtrl.value * 2 * math.pi,
-                  child: child,
-                ),
-                child: Container(
-                  width: 52,
-                  height: 52,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: AppTheme.primary,
-                      width: 3,
-                    ),
-                  ),
-                  child: const Align(
-                    alignment: Alignment.topCenter,
-                    child: Padding(
-                      padding: EdgeInsets.only(top: 3),
-                      child: Icon(Icons.circle, size: 6, color: AppTheme.primary),
-                    ),
-                  ),
-                ),
-              ),
+            child: const Center(
+              child: CircularProgressIndicator(
+                  color: AppTheme.primary, strokeWidth: 3),
             ),
           )
-        // Taraniyor: scan çizgisi
-        else if (durum == _ScanDurumu.taraniyor)
+        else
           AnimatedBuilder(
             animation: scanAnim,
             builder: (_, __) => Positioned(
@@ -426,8 +400,6 @@ class _ScanOverlay extends StatelessWidget {
               ),
             ),
           ),
-
-        // Köşe çerçevesi (pulse)
         AnimatedBuilder(
           animation: pulseAnim,
           builder: (_, __) => Positioned(
@@ -437,84 +409,62 @@ class _ScanOverlay extends StatelessWidget {
             height: frameH,
             child: CustomPaint(
               painter: _KoseFrameCizici(
-                renk: durum == _ScanDurumu.isleniyor
-                    ? AppTheme.warning
-                    : AppTheme.primary,
-                parlaklik: durum == _ScanDurumu.taraniyor
-                    ? pulseAnim.value
-                    : 1.0,
+                renk: yukleniyor ? AppTheme.warning : AppTheme.primary,
+                parlaklik: yukleniyor ? 1.0 : pulseAnim.value,
               ),
             ),
           ),
         ),
-
-        // Metin overlay (sadece taraniyor modunda)
-        if (durum == _ScanDurumu.taraniyor)
+        if (!yukleniyor)
           Positioned(
             left: 0,
             right: 0,
             top: frameT + frameH + 24,
             child: Column(
               children: [
-                const Text(
-                  'İlaç barkodunu okutun',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 17,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: -0.3,
-                  ),
-                ),
+                const Text('İlaç barkodunu okutun',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: -0.3)),
                 const SizedBox(height: 6),
-                Text(
-                  'Kamerayı barkod üzerine getirin',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.55),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w400,
-                  ),
-                ),
+                Text('Kamerayı barkod veya QR üzerine getirin',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.55),
+                        fontSize: 13)),
               ],
             ),
           ),
-
-        // İşleniyor metni
-        if (durum == _ScanDurumu.isleniyor)
+        if (yukleniyor)
           Positioned(
             left: 0,
             right: 0,
             top: frameT + frameH + 24,
             child: Column(
               children: [
-                const Text(
-                  'Barkod okunuyor...',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
+                const Text('Barkod okunuyor...',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600)),
                 const SizedBox(height: 4),
-                Text(
-                  'İlaç bilgileri sorgulanıyor',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.5),
-                    fontSize: 13,
-                  ),
-                ),
+                Text('İlaç bilgileri sorgulanıyor',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.5),
+                        fontSize: 13)),
               ],
             ),
           ),
       ],
     );
+    }); // LayoutBuilder
   }
 }
-
-// ─── OVERLAY BOYAYICI ────────────────────────────────────────────────────────
 
 class _OverlayCizici extends CustomPainter {
   final Rect frameRect;
@@ -522,30 +472,24 @@ class _OverlayCizici extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final karartma = Paint()..color = Colors.black.withValues(alpha: 0.55);
-
-    // 4 kenar şerit — frame dişi karartma
+    final p = Paint()..color = Colors.black.withValues(alpha: 0.55);
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, frameRect.top), p);
     canvas.drawRect(
-        Rect.fromLTWH(0, 0, size.width, frameRect.top), karartma);
+        Rect.fromLTWH(
+            0, frameRect.bottom, size.width, size.height - frameRect.bottom),
+        p);
     canvas.drawRect(
-        Rect.fromLTWH(0, frameRect.bottom, size.width,
-            size.height - frameRect.bottom),
-        karartma);
-    canvas.drawRect(
-        Rect.fromLTWH(0, frameRect.top, frameRect.left, frameRect.height),
-        karartma);
+        Rect.fromLTWH(0, frameRect.top, frameRect.left, frameRect.height), p);
     canvas.drawRect(
         Rect.fromLTWH(frameRect.right, frameRect.top,
             size.width - frameRect.right, frameRect.height),
-        karartma);
+        p);
   }
 
   @override
   bool shouldRepaint(covariant _OverlayCizici old) =>
       old.frameRect != frameRect;
 }
-
-// ─── KÖŞE ÇERÇEVE BOYAYICI ───────────────────────────────────────────────────
 
 class _KoseFrameCizici extends CustomPainter {
   final Color renk;
@@ -559,55 +503,41 @@ class _KoseFrameCizici extends CustomPainter {
       ..strokeWidth = 3.5
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round;
-
-    const margin = 0.0;
-    const cornerLen = 28.0;
-    const radius = 10.0;
-
-    // Glow efekti
-    final glowPaint = Paint()
+    final glow = Paint()
       ..color = renk.withValues(alpha: 0.25 * parlaklik)
       ..strokeWidth = 8
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
 
+    const cL = 28.0;
+    const r = 10.0;
+
     void drawCorner(List<Offset> pts) {
       final path = Path()..moveTo(pts[0].dx, pts[0].dy);
-      for (int i = 1; i < pts.length; i++) {
-        path.lineTo(pts[i].dx, pts[i].dy);
-      }
-      canvas.drawPath(path, glowPaint);
+      for (int i = 1; i < pts.length; i++) path.lineTo(pts[i].dx, pts[i].dy);
+      canvas.drawPath(path, glow);
       canvas.drawPath(path, paint);
     }
 
-    // Sol-üst
+    drawCorner([Offset(0, cL), Offset(0, r), Offset(r, 0), Offset(cL, 0)]);
     drawCorner([
-      Offset(margin, margin + cornerLen),
-      Offset(margin, margin + radius),
-      Offset(margin + radius, margin),
-      Offset(margin + cornerLen, margin),
+      Offset(size.width - cL, 0),
+      Offset(size.width - r, 0),
+      Offset(size.width, r),
+      Offset(size.width, cL)
     ]);
-    // Sağ-üst
     drawCorner([
-      Offset(size.width - margin - cornerLen, margin),
-      Offset(size.width - margin - radius, margin),
-      Offset(size.width - margin, margin + radius),
-      Offset(size.width - margin, margin + cornerLen),
+      Offset(0, size.height - cL),
+      Offset(0, size.height - r),
+      Offset(r, size.height),
+      Offset(cL, size.height)
     ]);
-    // Sol-alt
     drawCorner([
-      Offset(margin, size.height - margin - cornerLen),
-      Offset(margin, size.height - margin - radius),
-      Offset(margin + radius, size.height - margin),
-      Offset(margin + cornerLen, size.height - margin),
-    ]);
-    // Sağ-alt
-    drawCorner([
-      Offset(size.width - margin, size.height - margin - cornerLen),
-      Offset(size.width - margin, size.height - margin - radius),
-      Offset(size.width - margin - radius, size.height - margin),
-      Offset(size.width - margin - cornerLen, size.height - margin),
+      Offset(size.width, size.height - cL),
+      Offset(size.width, size.height - r),
+      Offset(size.width - r, size.height),
+      Offset(size.width - cL, size.height)
     ]);
   }
 
@@ -619,11 +549,14 @@ class _KoseFrameCizici extends CustomPainter {
 // ─── ÜST KONTROLLER ──────────────────────────────────────────────────────────
 
 class _UstKontroller extends StatelessWidget {
-  final bool flashAcik;
+  final bool flashDestegi;
   final VoidCallback onFlash;
   final VoidCallback? onIptal;
 
-  const _UstKontroller({required this.flashAcik, required this.onFlash, this.onIptal});
+  const _UstKontroller(
+      {required this.flashDestegi,
+      required this.onFlash,
+      required this.onIptal});
 
   @override
   Widget build(BuildContext context) {
@@ -633,7 +566,6 @@ class _UstKontroller extends StatelessWidget {
       right: 16,
       child: Row(
         children: [
-          // Geri / İptal
           GestureDetector(
             onTap: onIptal,
             child: Container(
@@ -651,77 +583,56 @@ class _UstKontroller extends StatelessWidget {
                   Icon(Icons.arrow_back_ios_new_rounded,
                       color: Colors.white, size: 14),
                   SizedBox(width: 6),
-                  Text(
-                    'İptal',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
+                  Text('İptal',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600)),
                 ],
               ),
             ),
           ),
           const Spacer(),
-          // Başlik
-          const Text(
-            'İlaç Ekle',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-              letterSpacing: -0.3,
-            ),
-          ),
+          const Text('İlaç Ekle',
+              style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.3)),
           const Spacer(),
-          // Flash butonu
-          GestureDetector(
-            onTap: onFlash,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: flashAcik
-                    ? Colors.white.withValues(alpha: 0.9)
-                    : Colors.white.withValues(alpha: 0.12),
-                shape: BoxShape.circle,
-                border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.2), width: 1),
+          if (flashDestegi)
+            GestureDetector(
+              onTap: onFlash,
+              child: Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.2), width: 1),
+                ),
+                child: const Icon(Icons.flash_on_rounded,
+                    color: Colors.white, size: 20),
               ),
-              child: Icon(
-                flashAcik
-                    ? Icons.flash_on_rounded
-                    : Icons.flash_off_rounded,
-                color: flashAcik ? const Color(0xFF1A1F36) : Colors.white,
-                size: 20,
-              ),
-            ),
-          ),
+            )
+          else
+            const SizedBox(width: 42),
         ],
       ),
     );
   }
 }
 
-// ─── DEMO BUTONLAR ───────────────────────────────────────────────────────────
+// ─── ALT BUTONLAR ────────────────────────────────────────────────────────────
 
-class _DemoButonlar extends StatelessWidget {
-  final _ScanDurumu durum;
+class _AltButonlar extends StatelessWidget {
   final VoidCallback onQrManuel;
   final VoidCallback onManuelEkle;
-
-  const _DemoButonlar({
-    required this.durum,
-    required this.onQrManuel,
-    required this.onManuelEkle,
-  });
+  const _AltButonlar({required this.onQrManuel, required this.onManuelEkle});
 
   @override
   Widget build(BuildContext context) {
-    if (durum != _ScanDurumu.taraniyor) return const SizedBox.shrink();
-
     return Positioned(
       bottom: 20,
       left: 20,
@@ -730,20 +641,18 @@ class _DemoButonlar extends StatelessWidget {
         children: [
           Expanded(
             child: _DemoBtn(
-              icon: Icons.qr_code_rounded,
-              label: "QR'ı Manuel Ekle",
-              renk: AppTheme.primary,
-              onTap: onQrManuel,
-            ),
+                icon: Icons.qr_code_rounded,
+                label: "Kodu Elle Gir",
+                renk: AppTheme.primary,
+                onTap: onQrManuel),
           ),
           const SizedBox(width: 10),
           Expanded(
             child: _DemoBtn(
-              icon: Icons.edit_note_rounded,
-              label: 'İlacı Manuel Ekle',
-              renk: AppTheme.warning,
-              onTap: onManuelEkle,
-            ),
+                icon: Icons.edit_note_rounded,
+                label: 'Manuel Ekle',
+                renk: AppTheme.warning,
+                onTap: onManuelEkle),
           ),
         ],
       ),
@@ -757,7 +666,10 @@ class _DemoBtn extends StatelessWidget {
   final Color renk;
   final VoidCallback onTap;
   const _DemoBtn(
-      {required this.icon, required this.label, required this.renk, required this.onTap});
+      {required this.icon,
+      required this.label,
+      required this.renk,
+      required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -776,15 +688,12 @@ class _DemoBtn extends StatelessWidget {
             Icon(icon, color: renk, size: 14),
             const SizedBox(width: 6),
             Flexible(
-              child: Text(
-                label,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: renk,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
+              child: Text(label,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      color: renk,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600)),
             ),
           ],
         ),
@@ -796,161 +705,73 @@ class _DemoBtn extends StatelessWidget {
 // ─── ALT PANEL ────────────────────────────────────────────────────────────────
 
 class _AltPanel extends StatelessWidget {
-  final VoidCallback onManuelGir;
-  const _AltPanel({required this.onManuelGir});
-
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: AppTheme.background,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+    final bottomInset = MediaQuery.of(context).padding.bottom;
+    return GestureDetector(
+      // Aşağı kaydırınca panel kapanır (ana nav'a döner)
+      onVerticalDragEnd: (details) {
+        if (details.primaryVelocity != null &&
+            details.primaryVelocity! > 300) {
+          // hızlı aşağı swipe — isteğe bağlı aksiyon buraya eklenebilir
+        }
+      },
+      child: Container(
+        decoration: const BoxDecoration(
+          color: AppTheme.background,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        padding: EdgeInsets.fromLTRB(20, 10, 20, bottomInset + 8),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Çekiş çubuğu
             Center(
               child: Container(
-                width: 40,
-                height: 4,
+                width: 36,
+                height: 3,
                 decoration: BoxDecoration(
-                  color: AppTheme.divider,
-                  borderRadius: BorderRadius.circular(2),
-                ),
+                    color: AppTheme.divider,
+                    borderRadius: BorderRadius.circular(2)),
               ),
             ),
-            const SizedBox(height: 16),
-            // Barkodu Elle Gir
-            GestureDetector(
-              onTap: onManuelGir,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 18, vertical: 14),
-                decoration: BoxDecoration(
-                  color: AppTheme.primary,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppTheme.primary.withValues(alpha: 0.3),
-                      blurRadius: 16,
-                      offset: const Offset(0, 6),
-                    ),
-                  ],
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                const Text('İpuçları',
+                    style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.textPrimary)),
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryLight,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: const Text('3',
+                      style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.primary)),
                 ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 42,
-                      height: 42,
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.2),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Icon(Icons.keyboard_outlined,
-                          color: Colors.white, size: 20),
-                    ),
-                    const SizedBox(width: 14),
-                    const Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Barkodu Elle Gir',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          SizedBox(height: 2),
-                          Text(
-                            'Barkod numarasını klavye ile girin',
-                            style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w400,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const Icon(Icons.arrow_forward_ios_rounded,
-                        color: Colors.white60, size: 14),
-                  ],
-                ),
-              ),
+              ],
             ),
             const SizedBox(height: 10),
-            // Manuel İlaç Ekle
-            GestureDetector(
-              onTap: onManuelGir,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 18, vertical: 14),
-                decoration: BoxDecoration(
-                  color: AppTheme.cardBackground,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: AppShadow.card,
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 42,
-                      height: 42,
-                      decoration: BoxDecoration(
-                        color: AppTheme.primaryLight,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Icon(Icons.add_circle_outline_rounded,
-                          color: AppTheme.primary, size: 20),
-                    ),
-                    const SizedBox(width: 14),
-                    const Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Manuel İlaç Ekle',
-                            style: TextStyle(
-                              color: AppTheme.textPrimary,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          SizedBox(height: 2),
-                          Text(
-                            'Tüm bilgileri kendiniz girin',
-                            style: TextStyle(
-                              color: AppTheme.textSecondary,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w400,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const Icon(Icons.arrow_forward_ios_rounded,
-                        color: AppTheme.textSecondary, size: 14),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
-            // Bilgi metni
-            Center(
-              child: Text(
-                'Barkod okunamazsa manuel giriş yapabilirsiniz',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: AppTheme.textSecondary.withValues(alpha: 0.7),
-                  fontWeight: FontWeight.w400,
-                ),
-              ),
-            ),
+            _IpucuSatiri(
+                ikon: Icons.qr_code_rounded,
+                metin: 'Kutudaki QR veya barkodu okutun'),
+            const SizedBox(height: 6),
+            _IpucuSatiri(
+                ikon: Icons.light_mode_outlined,
+                metin: 'Işık yetersizse flaşı kullanın'),
+            const SizedBox(height: 6),
+            _IpucuSatiri(
+                ikon: Icons.keyboard_outlined,
+                metin: 'Okutamazsanız kodu elle girin'),
           ],
         ),
       ),
@@ -958,12 +779,298 @@ class _AltPanel extends StatelessWidget {
   }
 }
 
-// ─── QR MANUEL GİRİŞ MODALI ──────────────────────────────────────────────────
+class _IpucuSatiri extends StatelessWidget {
+  final IconData ikon;
+  final String metin;
+  const _IpucuSatiri({required this.ikon, required this.metin});
 
-class _QrManuelModal extends StatefulWidget {
-  final void Function(String barkod) onSorgula;
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(ikon, size: 14, color: AppTheme.primary),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(metin,
+              style: const TextStyle(
+                  fontSize: 13, color: AppTheme.textSecondary)),
+        ),
+      ],
+    );
+  }
+}
+
+// ─── BULUNDU MODALI ───────────────────────────────────────────────────────────
+
+class _BulunduModal extends StatelessWidget {
+  final Map<String, String> ilac;
+  final VoidCallback onDevamEt;
   final VoidCallback onIptal;
 
+  const _BulunduModal(
+      {required this.ilac,
+      required this.onDevamEt,
+      required this.onIptal});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+          24, 20, 24, MediaQuery.of(context).viewInsets.bottom + 28),
+      decoration: const BoxDecoration(
+        color: AppTheme.cardBackground,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                  color: AppTheme.divider,
+                  borderRadius: BorderRadius.circular(2)),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                    color: AppTheme.successLight,
+                    borderRadius: BorderRadius.circular(12)),
+                child: const Icon(Icons.check_circle_outline_rounded,
+                    color: AppTheme.success, size: 22),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('İlaç Bulundu!',
+                        style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            color: AppTheme.textPrimary)),
+                    Text('Bilgiler otomatik dolduruldu',
+                        style: TextStyle(
+                            fontSize: 12, color: AppTheme.textSecondary)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          _DoluFormSatiri(
+              ikon: Icons.medication_outlined,
+              etiket: 'İlaç Adı',
+              deger: ilac['ad'] ?? ''),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                  child: _DoluFormSatiri(
+                      ikon: Icons.science_outlined,
+                      etiket: 'Doz',
+                      deger: ilac['doz'] ?? '')),
+              const SizedBox(width: 10),
+              Expanded(
+                  child: _DoluFormSatiri(
+                      ikon: Icons.inventory_2_outlined,
+                      etiket: 'Miktar',
+                      deger: '${ilac['adet']} ${ilac['birim']}')),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _DoluFormSatiri(
+              ikon: Icons.restaurant_outlined,
+              etiket: 'Kullanım Şekli',
+              deger: ilac['sekil'] ?? ''),
+          const SizedBox(height: 24),
+          Row(
+            children: [
+              Expanded(
+                child: GestureDetector(
+                  onTap: onIptal,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    decoration: BoxDecoration(
+                        color: AppTheme.background,
+                        borderRadius: BorderRadius.circular(14)),
+                    child: const Text('İptal',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.textSecondary)),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                flex: 2,
+                child: GestureDetector(
+                  onTap: onDevamEt,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    decoration: BoxDecoration(
+                      color: AppTheme.success,
+                      borderRadius: BorderRadius.circular(14),
+                      boxShadow: [
+                        BoxShadow(
+                            color: AppTheme.success.withValues(alpha: 0.3),
+                            blurRadius: 12,
+                            offset: const Offset(0, 4))
+                      ],
+                    ),
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.arrow_forward_rounded,
+                            color: Colors.white, size: 16),
+                        SizedBox(width: 6),
+                        Text('Devam Et',
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── BULUNAMADI MODALI ────────────────────────────────────────────────────────
+
+class _BulunamadiModal extends StatelessWidget {
+  final String barkod;
+  final VoidCallback onManuelDevam;
+  final VoidCallback onIptal;
+
+  const _BulunamadiModal(
+      {required this.barkod,
+      required this.onManuelDevam,
+      required this.onIptal});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+          24, 20, 24, MediaQuery.of(context).viewInsets.bottom + 28),
+      decoration: const BoxDecoration(
+        color: AppTheme.cardBackground,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                  color: AppTheme.divider,
+                  borderRadius: BorderRadius.circular(2)),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+                color: AppTheme.warningLight,
+                borderRadius: BorderRadius.circular(14)),
+            child: const Icon(Icons.search_off_rounded,
+                color: AppTheme.warning, size: 26),
+          ),
+          const SizedBox(height: 14),
+          const Text('İlaç Bulunamadı',
+              style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.textPrimary)),
+          const SizedBox(height: 6),
+          Text('Barkod ($barkod)\nveritabanında bulunamadı.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                  fontSize: 13, color: AppTheme.textSecondary)),
+          const SizedBox(height: 24),
+          Row(
+            children: [
+              Expanded(
+                child: GestureDetector(
+                  onTap: onIptal,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    decoration: BoxDecoration(
+                        color: AppTheme.background,
+                        borderRadius: BorderRadius.circular(14)),
+                    child: const Text('Tekrar Tara',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.textSecondary)),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                flex: 2,
+                child: GestureDetector(
+                  onTap: onManuelDevam,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    decoration: BoxDecoration(
+                      color: AppTheme.primary,
+                      borderRadius: BorderRadius.circular(14),
+                      boxShadow: [
+                        BoxShadow(
+                            color: AppTheme.primary.withValues(alpha: 0.3),
+                            blurRadius: 12,
+                            offset: const Offset(0, 4))
+                      ],
+                    ),
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.edit_note_rounded,
+                            color: Colors.white, size: 16),
+                        SizedBox(width: 6),
+                        Text('Manuel Gir',
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── QR MANUEL GİRİŞ ─────────────────────────────────────────────────────────
+
+class _QrManuelModal extends StatefulWidget {
+  final void Function(String) onSorgula;
+  final VoidCallback onIptal;
   const _QrManuelModal({required this.onSorgula, required this.onIptal});
 
   @override
@@ -995,28 +1102,24 @@ class _QrManuelModalState extends State<_QrManuelModal> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Tutamac
             Center(
               child: Container(
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: AppTheme.divider,
-                  borderRadius: BorderRadius.circular(2),
-                ),
+                    color: AppTheme.divider,
+                    borderRadius: BorderRadius.circular(2)),
               ),
             ),
             const SizedBox(height: 20),
-            // Baslik
             Row(
               children: [
                 Container(
                   width: 44,
                   height: 44,
                   decoration: BoxDecoration(
-                    color: AppTheme.primaryLight,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
+                      color: AppTheme.primaryLight,
+                      borderRadius: BorderRadius.circular(12)),
                   child: const Icon(Icons.qr_code_rounded,
                       color: AppTheme.primary, size: 22),
                 ),
@@ -1025,26 +1128,20 @@ class _QrManuelModalState extends State<_QrManuelModal> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        "QR'ı Manuel Gir",
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
-                          color: AppTheme.textPrimary,
-                        ),
-                      ),
-                      Text(
-                        'Barkod numarasini girin',
-                        style: TextStyle(
-                            fontSize: 12, color: AppTheme.textSecondary),
-                      ),
+                      Text("Barkodu Elle Gir",
+                          style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                              color: AppTheme.textPrimary)),
+                      Text('Kutudaki barkod numarasını girin',
+                          style: TextStyle(
+                              fontSize: 12, color: AppTheme.textSecondary)),
                     ],
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 24),
-            // Barkod numarasi alani
             Container(
               decoration: BoxDecoration(
                 color: AppTheme.background,
@@ -1056,21 +1153,19 @@ class _QrManuelModalState extends State<_QrManuelModal> {
                 keyboardType: TextInputType.number,
                 autofocus: true,
                 style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w700,
-                  color: AppTheme.textPrimary,
-                  letterSpacing: 2,
-                ),
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.textPrimary,
+                    letterSpacing: 2),
                 decoration: const InputDecoration(
                   hintText: '0000000000000',
                   hintStyle: TextStyle(
-                    color: AppTheme.textSecondary,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w400,
-                    letterSpacing: 2,
-                  ),
-                  prefixIcon: Icon(Icons.pin_outlined,
-                      color: AppTheme.primary, size: 22),
+                      color: AppTheme.textSecondary,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w400,
+                      letterSpacing: 2),
+                  prefixIcon:
+                      Icon(Icons.pin_outlined, color: AppTheme.primary, size: 22),
                   border: InputBorder.none,
                   contentPadding:
                       EdgeInsets.symmetric(horizontal: 16, vertical: 16),
@@ -1078,16 +1173,7 @@ class _QrManuelModalState extends State<_QrManuelModal> {
                 onChanged: (v) => setState(() => _bos = v.trim().isEmpty),
               ),
             ),
-            const SizedBox(height: 8),
-            Text(
-              'Kutunun üzerindeki 13 haneli barkod numarasini girin',
-              style: TextStyle(
-                fontSize: 12,
-                color: AppTheme.textSecondary.withValues(alpha: 0.7),
-              ),
-            ),
             const SizedBox(height: 24),
-            // Butonlar
             Row(
               children: [
                 Expanded(
@@ -1096,18 +1182,14 @@ class _QrManuelModalState extends State<_QrManuelModal> {
                     child: Container(
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       decoration: BoxDecoration(
-                        color: AppTheme.background,
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: const Text(
-                        'İptal',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.textSecondary,
-                        ),
-                      ),
+                          color: AppTheme.background,
+                          borderRadius: BorderRadius.circular(14)),
+                      child: const Text('İptal',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.textSecondary)),
                     ),
                   ),
                 ),
@@ -1126,16 +1208,6 @@ class _QrManuelModalState extends State<_QrManuelModal> {
                             ? AppTheme.primary.withValues(alpha: 0.4)
                             : AppTheme.primary,
                         borderRadius: BorderRadius.circular(14),
-                        boxShadow: _bos
-                            ? null
-                            : [
-                                BoxShadow(
-                                  color:
-                                      AppTheme.primary.withValues(alpha: 0.3),
-                                  blurRadius: 12,
-                                  offset: const Offset(0, 4),
-                                ),
-                              ],
                       ),
                       child: const Row(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -1143,14 +1215,11 @@ class _QrManuelModalState extends State<_QrManuelModal> {
                           Icon(Icons.search_rounded,
                               color: Colors.white, size: 16),
                           SizedBox(width: 6),
-                          Text(
-                            'Sorgula',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
+                          Text('Sorgula',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700)),
                         ],
                       ),
                     ),
@@ -1165,193 +1234,583 @@ class _QrManuelModalState extends State<_QrManuelModal> {
   }
 }
 
-// ─── BULUNDU MODALI ───────────────────────────────────────────────────────────
+// ─── DOZ AYARLARI SAYFASI ─────────────────────────────────────────────────────
 
-class _BulunduModal extends StatelessWidget {
-  final Map<String, String> ilac;
-  final VoidCallback onOnayla;
+class DozAyarlariSayfasi extends StatefulWidget {
+  final Map<String, String>? ilacBilgisi;
+  final VoidCallback onKaydet;
   final VoidCallback onIptal;
 
-  const _BulunduModal({
-    required this.ilac,
-    required this.onOnayla,
+  const DozAyarlariSayfasi({
+    super.key,
+    required this.ilacBilgisi,
+    required this.onKaydet,
     required this.onIptal,
   });
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: EdgeInsets.fromLTRB(
-          24, 20, 24, MediaQuery.of(context).viewInsets.bottom + 24),
-      decoration: const BoxDecoration(
-        color: AppTheme.cardBackground,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+  State<DozAyarlariSayfasi> createState() => _DozAyarlariSayfasiState();
+}
+
+class _DozAyarlariSayfasiState extends State<DozAyarlariSayfasi> {
+  final _adCtrl = TextEditingController();
+  final _dozCtrl = TextEditingController();
+  final _adetCtrl = TextEditingController();
+
+  String _gunlukDoz = 'Günde 1x';
+  String _kullanimSekli = 'Tok karna';
+  final List<_AlimZamani> _alimZamanlari = [];
+  DateTime _baslangicTarihi = DateTime.now();
+
+  final _gunlukDozlar = ['Günde 1x', 'Günde 2x', 'Günde 3x', 'Haftada 1x'];
+  final _sekiller = ['Tok karna', 'Aç karna', 'Fark etmez'];
+
+  @override
+  void initState() {
+    super.initState();
+    final b = widget.ilacBilgisi;
+    if (b != null) {
+      _adCtrl.text = b['ad'] ?? '';
+      _dozCtrl.text = b['doz'] ?? '';
+      _adetCtrl.text = b['adet'] ?? '';
+      _gunlukDoz = b['kullanim'] ?? 'Günde 1x';
+      _kullanimSekli = b['sekil'] ?? 'Tok karna';
+      // Otomatik zaman ekle
+      final zamanStr = b['zaman'] ?? '';
+      for (final z in zamanStr.split(',')) {
+        final isim = z.trim();
+        if (isim.isNotEmpty) {
+          final saat = _varsayilanSaat(isim);
+          _alimZamanlari
+              .add(_AlimZamani(isim: isim, saat: saat));
+        }
+      }
+    }
+    // En az 1 zaman olsun
+    if (_alimZamanlari.isEmpty) {
+      _alimZamanlari.add(_AlimZamani(isim: 'Sabah', saat: const TimeOfDay(hour: 8, minute: 0)));
+    }
+  }
+
+  TimeOfDay _varsayilanSaat(String isim) {
+    switch (isim) {
+      case 'Sabah': return const TimeOfDay(hour: 8, minute: 0);
+      case 'Öğle': return const TimeOfDay(hour: 12, minute: 0);
+      case 'Akşam': return const TimeOfDay(hour: 18, minute: 0);
+      case 'Gece': return const TimeOfDay(hour: 22, minute: 0);
+      default: return const TimeOfDay(hour: 9, minute: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _adCtrl.dispose();
+    _dozCtrl.dispose();
+    _adetCtrl.dispose();
+    super.dispose();
+  }
+
+  void _zamanEkle() {
+    final yeniZaman = _AlimZamani(
+        isim: 'Doz ${_alimZamanlari.length + 1}',
+        saat: const TimeOfDay(hour: 9, minute: 0));
+    setState(() => _alimZamanlari.add(yeniZaman));
+  }
+
+  void _zamanSil(int index) {
+    if (_alimZamanlari.length <= 1) return;
+    setState(() => _alimZamanlari.removeAt(index));
+  }
+
+  Future<void> _saatSec(int index) async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: _alimZamanlari[index].saat,
+      builder: (ctx, child) => MediaQuery(
+        data: MediaQuery.of(ctx).copyWith(alwaysUse24HourFormat: true),
+        child: child!,
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
+    );
+    if (picked != null) {
+      setState(() => _alimZamanlari[index] = _AlimZamani(
+          isim: _alimZamanlari[index].isim, saat: picked));
+    }
+  }
+
+  Future<void> _tarihSec() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _baslangicTarihi,
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+      locale: const Locale('tr'),
+    );
+    if (picked != null) setState(() => _baslangicTarihi = picked);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bool ilacBulundu = widget.ilacBilgisi != null;
+
+    return Scaffold(
+      backgroundColor: AppTheme.background,
+      body: Column(
         children: [
-          // Çekiş çubuğu
-          Center(
-            child: Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                  color: AppTheme.divider,
-                  borderRadius: BorderRadius.circular(2)),
-            ),
-          ),
-          const SizedBox(height: 20),
-          // Başlik satiri
-          Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: AppTheme.successLight,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(Icons.check_circle_outline_rounded,
-                    color: AppTheme.success, size: 22),
-              ),
-              const SizedBox(width: 12),
-              const Expanded(
+          // ── Header ────────────────────────────────────────────────────────
+          Container(
+            color: const Color(0xFF3B6CF6),
+            child: SafeArea(
+              bottom: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'İlaç Bulundu!',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                        color: AppTheme.textPrimary,
-                      ),
-                    ),
-                    Text(
-                      'Bilgiler otomatik dolduruldu',
-                      style: TextStyle(
-                          fontSize: 12, color: AppTheme.textSecondary),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          // Otomatik dolu form
-          _DoluFormSatiri(
-              ikon: Icons.medication_outlined,
-              etiket: 'İlaç Adı',
-              deger: ilac['ad'] ?? ''),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: _DoluFormSatiri(
-                    ikon: Icons.science_outlined,
-                    etiket: 'Doz',
-                    deger: ilac['doz'] ?? ''),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _DoluFormSatiri(
-                    ikon: Icons.inventory_2_outlined,
-                    etiket: 'Miktar',
-                    deger:
-                        '${ilac['adet']} ${ilac['birim']}'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: _DoluFormSatiri(
-                    ikon: Icons.repeat_rounded,
-                    etiket: 'Kullanım',
-                    deger: ilac['kullanim'] ?? ''),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _DoluFormSatiri(
-                    ikon: Icons.wb_sunny_outlined,
-                    etiket: 'Zaman',
-                    deger: ilac['zaman'] ?? ''),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          _DoluFormSatiri(
-              ikon: Icons.restaurant_outlined,
-              etiket: 'Kullanım Şekli',
-              deger: ilac['sekil'] ?? ''),
-          const SizedBox(height: 24),
-          // Butonlar
-          Row(
-            children: [
-              Expanded(
-                child: GestureDetector(
-                  onTap: onIptal,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    decoration: BoxDecoration(
-                      color: AppTheme.background,
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: const Text(
-                      'İptal',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.textSecondary,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                flex: 2,
-                child: GestureDetector(
-                  onTap: onOnayla,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    decoration: BoxDecoration(
-                      color: AppTheme.success,
-                      borderRadius: BorderRadius.circular(14),
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppTheme.success.withValues(alpha: 0.3),
-                          blurRadius: 12,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: const Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                    Row(
                       children: [
-                        Icon(Icons.check_rounded,
-                            color: Colors.white, size: 16),
-                        SizedBox(width: 6),
-                        Text(
-                          'Onayla ve Ekle',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
+                        GestureDetector(
+                          onTap: widget.onIptal,
+                          child: const Icon(Icons.arrow_back_ios_new_rounded,
+                              color: Colors.white70, size: 20),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Text(
+                            'Kullanım Ayarları',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: -0.3,
+                            ),
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            ilacBulundu ? 'Otomatik' : 'Manuel',
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600),
                           ),
                         ),
                       ],
                     ),
-                  ),
+                    const SizedBox(height: 8),
+                    Text(
+                      ilacBulundu
+                          ? 'Günlük dozunuzu ve saatlerinizi ayarlayın'
+                          : 'İlaç bilgilerini ve dozunuzu girin',
+                      style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.75),
+                          fontSize: 13),
+                    ),
+                  ],
                 ),
               ),
-            ],
+            ),
+          ),
+
+          // ── Form ──────────────────────────────────────────────────────────
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 24, 20, 32),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // İlaç temel bilgileri
+                  _BolumBaslik('İlaç Bilgileri',
+                      ikon: Icons.medication_outlined),
+                  const SizedBox(height: 12),
+                  _GirisAlani(
+                    ctrl: _adCtrl,
+                    hint: 'İlaç adı',
+                    ikon: Icons.medication_outlined,
+                    readOnly: ilacBulundu,
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _GirisAlani(
+                          ctrl: _dozCtrl,
+                          hint: 'Doz (mg)',
+                          ikon: Icons.science_outlined,
+                          klavye: TextInputType.text,
+                          readOnly: ilacBulundu,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _GirisAlani(
+                          ctrl: _adetCtrl,
+                          hint: 'Toplam adet',
+                          ikon: Icons.inventory_2_outlined,
+                          klavye: TextInputType.number,
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 24),
+                  _BolumBaslik('Günlük Doz', ikon: Icons.repeat_rounded),
+                  const SizedBox(height: 12),
+                  _ChipSecici(
+                    secenekler: _gunlukDozlar,
+                    secili: _gunlukDoz,
+                    onSecildi: (v) => setState(() => _gunlukDoz = v),
+                  ),
+
+                  const SizedBox(height: 24),
+                  _BolumBaslik('Alım Saatleri', ikon: Icons.access_time_rounded),
+                  const SizedBox(height: 12),
+                  ..._alimZamanlari.asMap().entries.map((e) {
+                    final i = e.key;
+                    final z = e.value;
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: _SaatKarti(
+                        isim: z.isim,
+                        saat: z.saat,
+                        silinebilir: _alimZamanlari.length > 1,
+                        onSaatSec: () => _saatSec(i),
+                        onSil: () => _zamanSil(i),
+                        onIsimDegis: (yeni) => setState(
+                          () => _alimZamanlari[i] =
+                              _AlimZamani(isim: yeni, saat: z.saat),
+                        ),
+                      ),
+                    );
+                  }),
+                  GestureDetector(
+                    onTap: _zamanEkle,
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryLight,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                            color: AppTheme.primary.withValues(alpha: 0.3),
+                            width: 1),
+                      ),
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.add_rounded,
+                              color: AppTheme.primary, size: 18),
+                          SizedBox(width: 6),
+                          Text('Saat Ekle',
+                              style: TextStyle(
+                                  color: AppTheme.primary,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 24),
+                  _BolumBaslik('Kullanım Şekli',
+                      ikon: Icons.restaurant_outlined),
+                  const SizedBox(height: 12),
+                  _ChipSecici(
+                    secenekler: _sekiller,
+                    secili: _kullanimSekli,
+                    onSecildi: (v) => setState(() => _kullanimSekli = v),
+                  ),
+
+                  const SizedBox(height: 24),
+                  _BolumBaslik('Başlangıç Tarihi',
+                      ikon: Icons.calendar_today_outlined),
+                  const SizedBox(height: 12),
+                  GestureDetector(
+                    onTap: _tarihSec,
+                    child: Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: AppTheme.cardBackground,
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: AppShadow.card,
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.calendar_month_outlined,
+                              color: AppTheme.primary, size: 20),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              '${_baslangicTarihi.day}.${_baslangicTarihi.month}.${_baslangicTarihi.year}',
+                              style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppTheme.textPrimary),
+                            ),
+                          ),
+                          const Icon(Icons.keyboard_arrow_right_rounded,
+                              color: AppTheme.textSecondary),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 32),
+                  // Kaydet Butonu
+                  GestureDetector(
+                    onTap: widget.onKaydet,
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary,
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: [
+                          BoxShadow(
+                              color: AppTheme.primary.withValues(alpha: 0.35),
+                              blurRadius: 16,
+                              offset: const Offset(0, 6))
+                        ],
+                      ),
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.check_rounded,
+                              color: Colors.white, size: 20),
+                          SizedBox(width: 8),
+                          Text('İlacı Kaydet',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
       ),
+    );
+  }
+}
+
+class _AlimZamani {
+  final String isim;
+  final TimeOfDay saat;
+  _AlimZamani({required this.isim, required this.saat});
+}
+
+// ─── DOZ SAYFASI YARDIMCI WİDGETLER ─────────────────────────────────────────
+
+class _BolumBaslik extends StatelessWidget {
+  final String baslik;
+  final IconData ikon;
+  const _BolumBaslik(this.baslik, {required this.ikon});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(ikon, size: 16, color: AppTheme.primary),
+        const SizedBox(width: 8),
+        Text(baslik,
+            style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.textPrimary)),
+      ],
+    );
+  }
+}
+
+class _GirisAlani extends StatelessWidget {
+  final TextEditingController ctrl;
+  final String hint;
+  final IconData ikon;
+  final TextInputType klavye;
+  final bool readOnly;
+
+  const _GirisAlani({
+    required this.ctrl,
+    required this.hint,
+    required this.ikon,
+    this.klavye = TextInputType.text,
+    this.readOnly = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: ctrl,
+      keyboardType: klavye,
+      readOnly: readOnly,
+      style: const TextStyle(
+          fontSize: 14,
+          color: AppTheme.textPrimary,
+          fontWeight: FontWeight.w500),
+      decoration: InputDecoration(
+        hintText: hint,
+        hintStyle:
+            const TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+        prefixIcon: Icon(ikon, color: AppTheme.primary, size: 18),
+        filled: true,
+        fillColor:
+            readOnly ? AppTheme.divider : AppTheme.cardBackground,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide.none,
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: AppTheme.primary, width: 1.5),
+        ),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+      ),
+    );
+  }
+}
+
+class _SaatKarti extends StatelessWidget {
+  final String isim;
+  final TimeOfDay saat;
+  final bool silinebilir;
+  final VoidCallback onSaatSec;
+  final VoidCallback onSil;
+  final ValueChanged<String> onIsimDegis;
+
+  const _SaatKarti({
+    required this.isim,
+    required this.saat,
+    required this.silinebilir,
+    required this.onSaatSec,
+    required this.onSil,
+    required this.onIsimDegis,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final saatStr =
+        '${saat.hour.toString().padLeft(2, '0')}:${saat.minute.toString().padLeft(2, '0')}';
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.cardBackground,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: AppShadow.card,
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+                color: AppTheme.primaryLight,
+                borderRadius: BorderRadius.circular(12)),
+            child: const Icon(Icons.access_alarm_rounded,
+                color: AppTheme.primary, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(isim,
+                    style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.textPrimary)),
+                Text('Alım vakti',
+                    style: const TextStyle(
+                        fontSize: 11, color: AppTheme.textSecondary)),
+              ],
+            ),
+          ),
+          GestureDetector(
+            onTap: onSaatSec,
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(saatStr,
+                  style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.primary)),
+            ),
+          ),
+          if (silinebilir) ...[
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: onSil,
+              child: Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                    color: AppTheme.criticalLight,
+                    borderRadius: BorderRadius.circular(8)),
+                child: const Icon(Icons.close_rounded,
+                    color: AppTheme.critical, size: 16),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _ChipSecici extends StatelessWidget {
+  final List<String> secenekler;
+  final String secili;
+  final ValueChanged<String> onSecildi;
+
+  const _ChipSecici(
+      {required this.secenekler,
+      required this.secili,
+      required this.onSecildi});
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: secenekler.map((s) {
+        final aktif = s == secili;
+        return GestureDetector(
+          onTap: () => onSecildi(s),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+            decoration: BoxDecoration(
+              color: aktif ? AppTheme.primary : AppTheme.cardBackground,
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(
+                  color: aktif ? AppTheme.primary : AppTheme.divider,
+                  width: 1.5),
+              boxShadow: aktif ? [] : AppShadow.card,
+            ),
+            child: Text(s,
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: aktif ? Colors.white : AppTheme.textSecondary)),
+          ),
+        );
+      }).toList(),
     );
   }
 }
@@ -1368,9 +1827,8 @@ class _DoluFormSatiri extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppTheme.background,
-        borderRadius: BorderRadius.circular(12),
-      ),
+          color: AppTheme.background,
+          borderRadius: BorderRadius.circular(12)),
       child: Row(
         children: [
           Icon(ikon, size: 16, color: AppTheme.primary),
@@ -1379,738 +1837,19 @@ class _DoluFormSatiri extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  etiket,
-                  style: const TextStyle(
-                      fontSize: 10, color: AppTheme.textSecondary),
-                ),
-                Text(
-                  deger,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: AppTheme.textPrimary,
-                  ),
-                ),
+                Text(etiket,
+                    style: const TextStyle(
+                        fontSize: 10, color: AppTheme.textSecondary)),
+                Text(deger,
+                    style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.textPrimary)),
               ],
             ),
           ),
         ],
       ),
-    );
-  }
-}
-
-// ─── BULUNAMADI MODALI ────────────────────────────────────────────────────────
-
-class _BulunamadiModal extends StatefulWidget {
-  final VoidCallback onKaydet;
-  final VoidCallback onIptal;
-
-  const _BulunamadiModal({required this.onKaydet, required this.onIptal});
-
-  @override
-  State<_BulunamadiModal> createState() => _BulunamadiModalState();
-}
-
-class _BulunamadiModalState extends State<_BulunamadiModal> {
-  String _secilenBirim = 'tablet';
-  String _secilenGunlukDoz = 'Günde 1x';
-  final List<String> _secilenZamanlar = [];
-  String _secilenSekil = 'Tok karna';
-
-  final List<String> _birimler = ['tablet', 'kapsül', 'ml', 'damla'];
-  final List<String> _gunlukDozlar = [
-    'Günde 1x',
-    'Günde 2x',
-    'Günde 3x',
-    'Haftada 1x',
-  ];
-  final List<String> _zamanlar = ['Sabah', 'Öğle', 'Akşam', 'Gece'];
-  final List<String> _sekiller = ['Tok karna', 'Aç karna', 'Fark etmez'];
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom),
-      child: Container(
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.of(context).size.height * 0.88,
-        ),
-        decoration: const BoxDecoration(
-          color: AppTheme.cardBackground,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Tutamaç
-            Padding(
-              padding: const EdgeInsets.only(top: 12, bottom: 4),
-              child: Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: AppTheme.divider,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-            ),
-            // Başlik
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-              child: Row(
-                children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: AppTheme.warningLight,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Icon(Icons.search_off_rounded,
-                        color: AppTheme.warning, size: 22),
-                  ),
-                  const SizedBox(width: 12),
-                  const Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'İlaç Bilgisi Bulunamadı',
-                          style: TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w800,
-                            color: AppTheme.textPrimary,
-                          ),
-                        ),
-                        Text(
-                          'Bilgileri kendiniz girin',
-                          style: TextStyle(
-                              fontSize: 12, color: AppTheme.textSecondary),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            // Form içeriği
-            Flexible(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _FormBaslik('İlaç Adı'),
-                    _GirisAlani(
-                      hint: 'İlaç adı girin',
-                      ikon: Icons.medication_outlined,
-                    ),
-                    const SizedBox(height: 16),
-                    _FormBaslik('Toplam Miktar'),
-                    Row(
-                      children: [
-                        const Expanded(
-                          flex: 2,
-                          child: _GirisAlani(
-                            hint: 'Adet',
-                            ikon: Icons.format_list_numbered_rounded,
-                            klavye: TextInputType.number,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          flex: 3,
-                          child: _BirimSecici(
-                            secili: _secilenBirim,
-                            secenekler: _birimler,
-                            onSecildi: (v) =>
-                                setState(() => _secilenBirim = v),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    _FormBaslik('Günlük Doz'),
-                    _ChipSecici(
-                      secenekler: _gunlukDozlar,
-                      secili: _secilenGunlukDoz,
-                      onSecildi: (v) =>
-                          setState(() => _secilenGunlukDoz = v),
-                    ),
-                    const SizedBox(height: 16),
-                    _FormBaslik('Kullanım Zamanı'),
-                    _CokluChipSecici(
-                      secenekler: _zamanlar,
-                      secilenler: _secilenZamanlar,
-                      ikonlar: const [
-                        Icons.wb_sunny_outlined,
-                        Icons.wb_cloudy_outlined,
-                        Icons.wb_twilight_outlined,
-                        Icons.bedtime_outlined,
-                      ],
-                      onDegisti: (v) =>
-                          setState(() {
-                        if (_secilenZamanlar.contains(v)) {
-                          _secilenZamanlar.remove(v);
-                        } else {
-                          _secilenZamanlar.add(v);
-                        }
-                      }),
-                    ),
-                    const SizedBox(height: 16),
-                    _FormBaslik('Kullanım Şekli'),
-                    _ChipSecici(
-                      secenekler: _sekiller,
-                      secili: _secilenSekil,
-                      onSecildi: (v) =>
-                          setState(() => _secilenSekil = v),
-                    ),
-                    const SizedBox(height: 24),
-                    // Butonlar
-                    Row(
-                      children: [
-                        Expanded(
-                          child: GestureDetector(
-                            onTap: widget.onIptal,
-                            child: Container(
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 14),
-                              decoration: BoxDecoration(
-                                color: AppTheme.background,
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                              child: const Text(
-                                'İptal',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: AppTheme.textSecondary,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          flex: 2,
-                          child: GestureDetector(
-                            onTap: widget.onKaydet,
-                            child: Container(
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 14),
-                              decoration: BoxDecoration(
-                                color: AppTheme.primary,
-                                borderRadius: BorderRadius.circular(14),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: AppTheme.primary
-                                        .withValues(alpha: 0.3),
-                                    blurRadius: 12,
-                                    offset: const Offset(0, 4),
-                                  ),
-                                ],
-                              ),
-                              child: const Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(Icons.save_outlined,
-                                      color: Colors.white, size: 16),
-                                  SizedBox(width: 6),
-                                  Text(
-                                    'İlacı Kaydet',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ─── MANUEL FORM MODALI ───────────────────────────────────────────────────────
-
-class _ManuelFormModal extends StatefulWidget {
-  final VoidCallback onKaydet;
-  final VoidCallback onIptal;
-
-  const _ManuelFormModal({required this.onKaydet, required this.onIptal});
-
-  @override
-  State<_ManuelFormModal> createState() => _ManuelFormModalState();
-}
-
-class _ManuelFormModalState extends State<_ManuelFormModal> {
-  String _secilenBirim = 'tablet';
-  String _secilenGunlukDoz = 'Günde 1x';
-  final List<String> _secilenZamanlar = [];
-  String _secilenSekil = 'Tok karna';
-
-  final List<String> _birimler = ['tablet', 'kapsül', 'ml', 'damla'];
-  final List<String> _gunlukDozlar = [
-    'Günde 1x',
-    'Günde 2x',
-    'Günde 3x',
-    'Haftada 1x',
-  ];
-  final List<String> _zamanlar = ['Sabah', 'Öğle', 'Akşam', 'Gece'];
-  final List<String> _sekiller = ['Tok karna', 'Aç karna', 'Fark etmez'];
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom),
-      child: Container(
-        constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(context).size.height * 0.90),
-        decoration: const BoxDecoration(
-          color: AppTheme.cardBackground,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.only(top: 12, bottom: 4),
-              child: Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: AppTheme.divider,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-              child: Row(
-                children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: AppTheme.primaryLight,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Icon(Icons.add_circle_outline_rounded,
-                        color: AppTheme.primary, size: 22),
-                  ),
-                  const SizedBox(width: 12),
-                  const Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Manuel İlaç Ekle',
-                          style: TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w800,
-                            color: AppTheme.textPrimary,
-                          ),
-                        ),
-                        Text(
-                          'İlaç bilgilerini doldurun',
-                          style: TextStyle(
-                              fontSize: 12, color: AppTheme.textSecondary),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            Flexible(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _FormBaslik('İlaç Adı'),
-                    const _GirisAlani(
-                      hint: 'İlaç adı girin',
-                      ikon: Icons.medication_outlined,
-                    ),
-                    const SizedBox(height: 16),
-                    _FormBaslik('Toplam Miktar'),
-                    Row(
-                      children: [
-                        const Expanded(
-                          flex: 2,
-                          child: _GirisAlani(
-                            hint: 'Adet',
-                            ikon: Icons.format_list_numbered_rounded,
-                            klavye: TextInputType.number,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          flex: 3,
-                          child: _BirimSecici(
-                            secili: _secilenBirim,
-                            secenekler: _birimler,
-                            onSecildi: (v) =>
-                                setState(() => _secilenBirim = v),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    _FormBaslik('Günlük Doz'),
-                    _ChipSecici(
-                      secenekler: _gunlukDozlar,
-                      secili: _secilenGunlukDoz,
-                      onSecildi: (v) =>
-                          setState(() => _secilenGunlukDoz = v),
-                    ),
-                    const SizedBox(height: 16),
-                    _FormBaslik('Kullanım Zamanı'),
-                    _CokluChipSecici(
-                      secenekler: _zamanlar,
-                      secilenler: _secilenZamanlar,
-                      ikonlar: const [
-                        Icons.wb_sunny_outlined,
-                        Icons.wb_cloudy_outlined,
-                        Icons.wb_twilight_outlined,
-                        Icons.bedtime_outlined,
-                      ],
-                      onDegisti: (v) => setState(() {
-                        if (_secilenZamanlar.contains(v)) {
-                          _secilenZamanlar.remove(v);
-                        } else {
-                          _secilenZamanlar.add(v);
-                        }
-                      }),
-                    ),
-                    const SizedBox(height: 16),
-                    _FormBaslik('Kullanım Şekli'),
-                    _ChipSecici(
-                      secenekler: _sekiller,
-                      secili: _secilenSekil,
-                      onSecildi: (v) =>
-                          setState(() => _secilenSekil = v),
-                    ),
-                    const SizedBox(height: 24),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: GestureDetector(
-                            onTap: widget.onIptal,
-                            child: Container(
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 14),
-                              decoration: BoxDecoration(
-                                color: AppTheme.background,
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                              child: const Text(
-                                'İptal',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: AppTheme.textSecondary,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          flex: 2,
-                          child: GestureDetector(
-                            onTap: widget.onKaydet,
-                            child: Container(
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 14),
-                              decoration: BoxDecoration(
-                                color: AppTheme.primary,
-                                borderRadius: BorderRadius.circular(14),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: AppTheme.primary
-                                        .withValues(alpha: 0.3),
-                                    blurRadius: 12,
-                                    offset: const Offset(0, 4),
-                                  ),
-                                ],
-                              ),
-                              child: const Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(Icons.save_outlined,
-                                      color: Colors.white, size: 16),
-                                  SizedBox(width: 6),
-                                  Text(
-                                    'İlacı Kaydet',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ─── FORM YARDIMCI WİDGETLER ─────────────────────────────────────────────────
-
-class _FormBaslik extends StatelessWidget {
-  final String metin;
-  const _FormBaslik(this.metin);
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Text(
-        metin,
-        style: const TextStyle(
-          fontSize: 13,
-          fontWeight: FontWeight.w700,
-          color: AppTheme.textPrimary,
-          letterSpacing: 0.1,
-        ),
-      ),
-    );
-  }
-}
-
-class _GirisAlani extends StatelessWidget {
-  final String hint;
-  final IconData ikon;
-  final TextInputType klavye;
-
-  const _GirisAlani({
-    required this.hint,
-    required this.ikon,
-    this.klavye = TextInputType.text,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return TextField(
-      keyboardType: klavye,
-      style: const TextStyle(
-          fontSize: 14,
-          color: AppTheme.textPrimary,
-          fontWeight: FontWeight.w500),
-      decoration: InputDecoration(
-        hintText: hint,
-        hintStyle:
-            const TextStyle(color: AppTheme.textSecondary, fontSize: 13),
-        prefixIcon: Icon(ikon, color: AppTheme.primary, size: 18),
-        filled: true,
-        fillColor: AppTheme.background,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide:
-              const BorderSide(color: AppTheme.primary, width: 1.5),
-        ),
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-      ),
-    );
-  }
-}
-
-class _BirimSecici extends StatelessWidget {
-  final String secili;
-  final List<String> secenekler;
-  final ValueChanged<String> onSecildi;
-
-  const _BirimSecici({
-    required this.secili,
-    required this.secenekler,
-    required this.onSecildi,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(
-        color: AppTheme.background,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: secili,
-          isExpanded: true,
-          icon: const Icon(Icons.keyboard_arrow_down_rounded,
-              color: AppTheme.primary, size: 18),
-          style: const TextStyle(
-            fontSize: 14,
-            color: AppTheme.textPrimary,
-            fontWeight: FontWeight.w500,
-          ),
-          items: secenekler
-              .map((s) => DropdownMenuItem(
-                    value: s,
-                    child: Text(s),
-                  ))
-              .toList(),
-          onChanged: (v) => v != null ? onSecildi(v) : null,
-        ),
-      ),
-    );
-  }
-}
-
-class _ChipSecici extends StatelessWidget {
-  final List<String> secenekler;
-  final String secili;
-  final ValueChanged<String> onSecildi;
-
-  const _ChipSecici({
-    required this.secenekler,
-    required this.secili,
-    required this.onSecildi,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: secenekler.map((s) {
-        final aktif = s == secili;
-        return GestureDetector(
-          onTap: () => onSecildi(s),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            padding:
-                const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-            decoration: BoxDecoration(
-              color: aktif ? AppTheme.primary : AppTheme.background,
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(
-                color: aktif
-                    ? AppTheme.primary
-                    : AppTheme.divider,
-                width: 1.5,
-              ),
-            ),
-            child: Text(
-              s,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: aktif ? Colors.white : AppTheme.textSecondary,
-              ),
-            ),
-          ),
-        );
-      }).toList(),
-    );
-  }
-}
-
-class _CokluChipSecici extends StatelessWidget {
-  final List<String> secenekler;
-  final List<String> secilenler;
-  final List<IconData> ikonlar;
-  final ValueChanged<String> onDegisti;
-
-  const _CokluChipSecici({
-    required this.secenekler,
-    required this.secilenler,
-    required this.ikonlar,
-    required this.onDegisti,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: List.generate(secenekler.length, (i) {
-        final aktif = secilenler.contains(secenekler[i]);
-        return Expanded(
-          child: Padding(
-            padding: EdgeInsets.only(right: i < secenekler.length - 1 ? 8 : 0),
-            child: GestureDetector(
-              onTap: () => onDegisti(secenekler[i]),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                padding: const EdgeInsets.symmetric(vertical: 11),
-                decoration: BoxDecoration(
-                  color: aktif ? AppTheme.primaryLight : AppTheme.background,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: aktif
-                        ? AppTheme.primary
-                        : AppTheme.divider,
-                    width: 1.5,
-                  ),
-                ),
-                child: Column(
-                  children: [
-                    Icon(
-                      ikonlar[i],
-                      size: 18,
-                      color: aktif
-                          ? AppTheme.primary
-                          : AppTheme.textSecondary,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      secenekler[i],
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: aktif
-                            ? AppTheme.primary
-                            : AppTheme.textSecondary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        );
-      }),
     );
   }
 }

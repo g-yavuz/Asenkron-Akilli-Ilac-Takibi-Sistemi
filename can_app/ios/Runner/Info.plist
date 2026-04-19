@@ -41,6 +41,8 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>İlaç barkodunu taramak için kameraya ihtiyaç duyuyoruz.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Yakınındaki eczaneleri göstermek için konumunuza ihtiyaç duyuyoruz.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>

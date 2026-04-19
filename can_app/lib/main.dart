@@ -6,6 +6,7 @@ import 'screens/home_screen.dart';
 import 'screens/ilac_ekle_screen.dart';
 import 'screens/pharmacies_screen.dart';
 import 'screens/profile_screen.dart';
+import 'screens/splash_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,11 +26,32 @@ class MedTrackerApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'MedTracker',
+      title: 'Asenkron',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.theme,
-      home: const MainShell(),
+      home: const _GirisYonlendirici(),
     );
+  }
+}
+
+class _GirisYonlendirici extends StatefulWidget {
+  const _GirisYonlendirici();
+
+  @override
+  State<_GirisYonlendirici> createState() => _GirisYonlendiriciState();
+}
+
+class _GirisYonlendiriciState extends State<_GirisYonlendirici> {
+  bool _splashBitti = false;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_splashBitti) {
+      return SplashScreen(
+        onBitti: () => setState(() => _splashBitti = true),
+      );
+    }
+    return const MainShell();
   }
 }
 

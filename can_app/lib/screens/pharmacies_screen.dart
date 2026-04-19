@@ -124,10 +124,12 @@ class _PharmaciesScreenState extends State<PharmaciesScreen> {
   Future<void> _eczaneleriGetir(LatLng merkez) async {
     const yariCap = 20000;
     final query = '''
-[out:json][timeout:25];
+[out:json][timeout:30];
 (
   node["amenity"="pharmacy"](around:$yariCap,${merkez.latitude},${merkez.longitude});
   way["amenity"="pharmacy"](around:$yariCap,${merkez.latitude},${merkez.longitude});
+  node["amenity"="pharmacy"]["opening_hours"="24/7"](around:$yariCap,${merkez.latitude},${merkez.longitude});
+  node["amenity"="pharmacy"]["dispensing:emergency"="yes"](around:$yariCap,${merkez.latitude},${merkez.longitude});
 );
 out center tags;
 ''';
@@ -174,7 +176,7 @@ out center tags;
 
         final mesafe = _haversine(merkez.latitude, merkez.longitude, lat, lon);
         final acik = _acikMi(oh);
-        final nobetci = _nobetciMi(oh, ad);
+        final nobetci = _nobetciMi(oh, ad, tags);
 
         liste.add(GercekEczane(
           id: el['id'].toString(),
@@ -191,6 +193,16 @@ out center tags;
       }
 
       liste.sort((a, b) => a.mesafe.compareTo(b.mesafe));
+
+      // OSM'de nöbetçi bilgisi yoksa: gece saatinde açık olan tek eczane muhtemelen nöbetçidir
+      final now = DateTime.now();
+      final gece = now.hour >= 20 || now.hour < 8;
+      if (gece && liste.every((e) => !e.nobetci)) {
+        final aciklar = liste.where((e) => e.acik).toList();
+        for (final e in aciklar) {
+          e.nobetci = true;
+        }
+      }
 
       setState(() {
         _eczaneler = liste;
@@ -217,32 +229,78 @@ out center tags;
   double _rad(double deg) => deg * pi / 180;
 
   bool _acikMi(String oh) {
-    if (oh.isEmpty) return false;
-    if (oh.contains('24/7')) return true;
-    final now = DateTime.now();
-    final gun = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'][now.weekday - 1];
-    if (!oh.contains(gun) && !oh.contains('Mo-Fr') && !oh.contains('Mo-Su')) {
-      return false;
+    if (oh.isEmpty) {
+      // Saat bilgisi yoksa Türkiye standart eczane saatlerine göre tahmin
+      final now = DateTime.now();
+      if (now.weekday == DateTime.sunday) return false;
+      if (now.weekday == DateTime.saturday) {
+        return now.hour >= 9 && now.hour < 14;
+      }
+      return now.hour >= 9 && now.hour < 19;
     }
-    final match = RegExp(r'(\d{2}):(\d{2})-(\d{2}):(\d{2})').firstMatch(oh);
-    if (match == null) return false;
-    final acilis = TimeOfDay(
-        hour: int.parse(match.group(1)!), minute: int.parse(match.group(2)!));
-    final kapanis = TimeOfDay(
-        hour: int.parse(match.group(3)!), minute: int.parse(match.group(4)!));
-    final simdi = TimeOfDay.now();
-    final acilisDk = acilis.hour * 60 + acilis.minute;
-    final kapanisDk = kapanis.hour * 60 + kapanis.minute;
-    final simdiDk = simdi.hour * 60 + simdi.minute;
-    return simdiDk >= acilisDk && simdiDk <= kapanisDk;
+    if (oh.contains('24/7')) return true;
+
+    final now = DateTime.now();
+    // Noktalı virgülle ayrılmış kuralları sırayla dene
+    for (final kural in oh.split(';')) {
+      if (_kuralAcikMi(kural.trim(), now)) return true;
+    }
+    return false;
   }
 
-  bool _nobetciMi(String oh, String ad) {
-    if (oh.contains('24/7')) return true;
-    final adLower = ad.toLowerCase();
-    if (adLower.contains('nöbetçi') || adLower.contains('nobetci')) {
-      return true;
+  bool _kuralAcikMi(String kural, DateTime now) {
+    if (kural.isEmpty) return false;
+    if (kural.toLowerCase().contains(' off')) return false;
+
+    final gunlar = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
+    final bugunIdx = now.weekday - 1; // 0=Mo ... 6=Su
+
+    // Gün aralığı: Mo-Fr, Mo-Sa, Mo-Su, We-Sa ...
+    bool gunUygun = false;
+    final aralik =
+        RegExp(r'(Mo|Tu|We|Th|Fr|Sa|Su)-(Mo|Tu|We|Th|Fr|Sa|Su)').firstMatch(kural);
+    if (aralik != null) {
+      final bas = gunlar.indexOf(aralik.group(1)!);
+      final bit = gunlar.indexOf(aralik.group(2)!);
+      gunUygun = bugunIdx >= bas && bugunIdx <= bit;
+    } else {
+      // Tek gün: "Sa 09:00-14:00"
+      final tekGun = RegExp(r'\b(Mo|Tu|We|Th|Fr|Sa|Su)\b').firstMatch(kural);
+      if (tekGun != null) {
+        gunUygun = gunlar.indexOf(tekGun.group(1)!) == bugunIdx;
+      } else {
+        // Gün belirtilmemiş → her gün geçerli say
+        gunUygun = true;
+      }
     }
+    if (!gunUygun) return false;
+
+    // Saat aralığı
+    final saatMatch =
+        RegExp(r'(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})').firstMatch(kural);
+    if (saatMatch == null) return false;
+
+    final acilisDk =
+        int.parse(saatMatch.group(1)!) * 60 + int.parse(saatMatch.group(2)!);
+    final kapanisDk =
+        int.parse(saatMatch.group(3)!) * 60 + int.parse(saatMatch.group(4)!);
+    final simdiDk = now.hour * 60 + now.minute;
+
+    return simdiDk >= acilisDk && simdiDk < kapanisDk;
+  }
+
+  bool _nobetciMi(String oh, String ad, Map<String, dynamic> tags) {
+    // 1. 24 saat açık → nöbetçi
+    if (oh.contains('24/7')) return true;
+    // 2. İsim içinde nöbetçi geçiyorsa
+    final adLower = ad.toLowerCase();
+    if (adLower.contains('nöbet') || adLower.contains('nobet')) return true;
+    // 3. OSM dispensing:emergency veya emergency:prescription tag'i
+    if (tags['dispensing:emergency'] == 'yes') return true;
+    if (tags['emergency'] == 'yes') return true;
+    // 4. description veya note içinde nöbet geçiyorsa
+    final desc = ((tags['description'] ?? '') + (tags['note'] ?? '')).toLowerCase();
+    if (desc.contains('nöbet') || desc.contains('nobet')) return true;
     return false;
   }
 
