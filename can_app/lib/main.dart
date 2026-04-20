@@ -7,9 +7,11 @@ import 'screens/ilac_ekle_screen.dart';
 import 'screens/pharmacies_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/splash_screen.dart';
+import 'services/ilac_depo.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await IlacDepo.yukle();
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,

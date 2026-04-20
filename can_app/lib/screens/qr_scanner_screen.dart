@@ -162,9 +162,9 @@ class _QrScannerScreenState extends State<QrScannerScreen>
                       gradient: LinearGradient(
                         colors: [
                           Colors.transparent,
-                          AppTheme.primary.withOpacity(0.8),
+                          AppTheme.primary.withValues(alpha: 0.8),
                           AppTheme.primary,
-                          AppTheme.primary.withOpacity(0.8),
+                          AppTheme.primary.withValues(alpha: 0.8),
                           Colors.transparent,
                         ],
                       ),
@@ -182,7 +182,7 @@ class _QrScannerScreenState extends State<QrScannerScreen>
                     padding: const EdgeInsets.symmetric(
                         horizontal: 16, vertical: 8),
                     decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.4),
+                      color: Colors.black.withValues(alpha: 0.4),
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(
@@ -506,7 +506,7 @@ class _GridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.white.withOpacity(0.04)
+      ..color = Colors.white.withValues(alpha: 0.04)
       ..strokeWidth = 1;
 
     const spacing = 30.0;

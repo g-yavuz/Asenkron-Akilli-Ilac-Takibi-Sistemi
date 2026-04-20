@@ -18,9 +18,9 @@ class Ilac {
   final String not;
   final int kalanAdet;
   final int toplamAdet;
-  final String kullanimBilgisi;   // "Günde 2x - Tok karna"
+  final String kullanimBilgisi;
   final KullanimZamani zaman;
-  final String birim;             // "tablet", "ml", "kapsül"
+  final String birim;
 
   const Ilac({
     required this.id,
@@ -41,6 +41,73 @@ class Ilac {
   double get stokOrani => kalanAdet / (toplamAdet == 0 ? 1 : toplamAdet);
   bool get azKaldi => stokOrani < 0.2;
   bool get bitti => kalanAdet == 0;
+
+  // ── JSON ────────────────────────────────────────────────────────────────
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'ad': ad,
+        'doz': doz,
+        'saat': saat,
+        'durum': durum.index,
+        'tur': tur.index,
+        'renk': renk.toARGB32(),
+        'not': not,
+        'kalanAdet': kalanAdet,
+        'toplamAdet': toplamAdet,
+        'kullanimBilgisi': kullanimBilgisi,
+        'zaman': zaman.index,
+        'birim': birim,
+      };
+
+  factory Ilac.fromJson(Map<String, dynamic> j) => Ilac(
+        id: j['id'] as String,
+        ad: j['ad'] as String,
+        doz: j['doz'] as String,
+        saat: j['saat'] as String,
+        durum: IlacDurumu.values[j['durum'] as int],
+        tur: IlacTuru.values[j['tur'] as int],
+        renk: Color(j['renk'] as int),
+        not: j['not'] as String? ?? '',
+        kalanAdet: j['kalanAdet'] as int,
+        toplamAdet: j['toplamAdet'] as int,
+        kullanimBilgisi: j['kullanimBilgisi'] as String,
+        zaman: KullanimZamani.values[j['zaman'] as int],
+        birim: j['birim'] as String? ?? 'tablet',
+      );
+
+  // ── copyWith ─────────────────────────────────────────────────────────────
+
+  Ilac copyWith({
+    String? id,
+    String? ad,
+    String? doz,
+    String? saat,
+    IlacDurumu? durum,
+    IlacTuru? tur,
+    Color? renk,
+    String? not,
+    int? kalanAdet,
+    int? toplamAdet,
+    String? kullanimBilgisi,
+    KullanimZamani? zaman,
+    String? birim,
+  }) =>
+      Ilac(
+        id: id ?? this.id,
+        ad: ad ?? this.ad,
+        doz: doz ?? this.doz,
+        saat: saat ?? this.saat,
+        durum: durum ?? this.durum,
+        tur: tur ?? this.tur,
+        renk: renk ?? this.renk,
+        not: not ?? this.not,
+        kalanAdet: kalanAdet ?? this.kalanAdet,
+        toplamAdet: toplamAdet ?? this.toplamAdet,
+        kullanimBilgisi: kullanimBilgisi ?? this.kullanimBilgisi,
+        zaman: zaman ?? this.zaman,
+        birim: birim ?? this.birim,
+      );
 }
 
 class Eczane {
@@ -65,10 +132,10 @@ class Eczane {
   });
 }
 
-// Örnek ilaç verileri (Türkçe)
+// Örnek ilaçlar (ilk kurulum için seed)
 final List<Ilac> ornekIlaclar = [
   const Ilac(
-    id: '1',
+    id: 'ornek_1',
     ad: 'Apranax Fort',
     doz: '550mg',
     saat: '08:00',
@@ -83,7 +150,7 @@ final List<Ilac> ornekIlaclar = [
     birim: 'tablet',
   ),
   const Ilac(
-    id: '2',
+    id: 'ornek_2',
     ad: 'Beloc Zok',
     doz: '50mg',
     saat: '12:00',
@@ -98,7 +165,7 @@ final List<Ilac> ornekIlaclar = [
     birim: 'tablet',
   ),
   const Ilac(
-    id: '3',
+    id: 'ornek_3',
     ad: 'Glifor',
     doz: '850mg',
     saat: '14:00',
@@ -113,7 +180,7 @@ final List<Ilac> ornekIlaclar = [
     birim: 'tablet',
   ),
   const Ilac(
-    id: '4',
+    id: 'ornek_4',
     ad: 'D-Vit 1000',
     doz: '1000 IU',
     saat: '18:00',
@@ -128,7 +195,7 @@ final List<Ilac> ornekIlaclar = [
     birim: 'kapsül',
   ),
   const Ilac(
-    id: '5',
+    id: 'ornek_5',
     ad: 'Benexol B12',
     doz: '1000mcg',
     saat: '21:00',
@@ -141,60 +208,5 @@ final List<Ilac> ornekIlaclar = [
     kullanimBilgisi: 'Günde 1x · Tok karna',
     zaman: KullanimZamani.gece,
     birim: 'tablet',
-  ),
-];
-
-// Stoku biten ilaçlar
-List<Ilac> get stokuBitenler =>
-    ornekIlaclar.where((i) => i.bitti).toList();
-
-// Az kalan ilaçlar
-List<Ilac> get azKalanlar =>
-    ornekIlaclar.where((i) => i.azKaldi && !i.bitti).toList();
-
-// Atılan dozlar
-List<Ilac> get atilanlar =>
-    ornekIlaclar.where((i) => i.durum == IlacDurumu.atildi).toList();
-
-final List<Eczane> ornekEczaneler = [
-  const Eczane(
-    id: '1',
-    ad: 'Yıldız Eczanesi',
-    adres: 'Bağcılar Mah. 142 No, İstanbul',
-    mesafe: 0.3,
-    acik: true,
-    calismaInfo: '22:00\'a kadar açık',
-    puan: 4.8,
-    telefon: '+90 212 000 0000',
-  ),
-  const Eczane(
-    id: '2',
-    ad: 'Güneş Eczanesi',
-    adres: 'Merkez Cad. 87, İstanbul',
-    mesafe: 0.7,
-    acik: true,
-    calismaInfo: '21:00\'a kadar açık',
-    puan: 4.6,
-    telefon: '+90 212 000 0001',
-  ),
-  const Eczane(
-    id: '3',
-    ad: 'Nöbetçi Eczane',
-    adres: 'Tıp Bulvarı 23, İstanbul',
-    mesafe: 1.2,
-    acik: false,
-    calismaInfo: 'Yarın 08:00\'de açılıyor',
-    puan: 4.3,
-    telefon: '+90 212 000 0002',
-  ),
-  const Eczane(
-    id: '4',
-    ad: 'Sağlık Eczanesi',
-    adres: 'Meşe Sok. 56, İstanbul',
-    mesafe: 1.8,
-    acik: true,
-    calismaInfo: '24 saat açık',
-    puan: 4.9,
-    telefon: '+90 212 000 0003',
   ),
 ];

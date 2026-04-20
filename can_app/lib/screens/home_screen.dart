@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../models/medicine.dart';
+import '../services/ilac_depo.dart';
 import '../theme.dart';
+import 'tum_ilaclar_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -10,16 +13,13 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  List<Ilac> ilaclar = List.from(ornekIlaclar);
+  List<Ilac> get ilaclar => IlacDepo.ilaclar.value;
 
   int get alinanSayisi =>
       ilaclar.where((i) => i.durum == IlacDurumu.alindi).length;
-
   int get atilanSayisi =>
       ilaclar.where((i) => i.durum == IlacDurumu.atildi).length;
-
   int get stokuBitenSayisi => ilaclar.where((i) => i.bitti).length;
-
   int get azKalanSayisi =>
       ilaclar.where((i) => i.azKaldi && !i.bitti).length;
 
@@ -30,66 +30,148 @@ class _HomeScreenState extends State<HomeScreen> {
     return alinanSayisi / toplam;
   }
 
-  void _ilacAl(String id) {
-    setState(() {
-      ilaclar = ilaclar.map((ilac) {
-        if (ilac.id == id && ilac.durum == IlacDurumu.bekliyor) {
-          return Ilac(
-            id: ilac.id,
-            ad: ilac.ad,
-            doz: ilac.doz,
-            saat: ilac.saat,
-            durum: IlacDurumu.alindi,
-            tur: ilac.tur,
-            renk: AppTheme.success,
-            not: ilac.not,
-            kalanAdet: (ilac.kalanAdet - 1).clamp(0, ilac.toplamAdet),
-            toplamAdet: ilac.toplamAdet,
-            kullanimBilgisi: ilac.kullanimBilgisi,
-            zaman: ilac.zaman,
-            birim: ilac.birim,
-          );
-        }
-        return ilac;
-      }).toList();
-    });
+  @override
+  void initState() {
+    super.initState();
+    IlacDepo.ilaclar.addListener(_yenile);
+  }
+
+  @override
+  void dispose() {
+    IlacDepo.ilaclar.removeListener(_yenile);
+    super.dispose();
+  }
+
+  void _yenile() => setState(() {});
+
+  Future<void> _ilacAl(String id) async {
+    final matches = ilaclar.where((i) => i.id == id);
+    if (matches.isEmpty) return;
+    final ilac = matches.first;
+    if (ilac.durum != IlacDurumu.bekliyor) return;
+    HapticFeedback.mediumImpact();
+    await IlacDepo.guncelle(ilac.copyWith(
+      durum: IlacDurumu.alindi,
+      renk: AppTheme.success,
+      kalanAdet: (ilac.kalanAdet - 1).clamp(0, ilac.toplamAdet),
+    ));
+  }
+
+  Future<void> _ilacSil(String id) async {
+    final matches = ilaclar.where((i) => i.id == id);
+    if (matches.isEmpty) return;
+    final ilac = matches.first;
+    final onay = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('İlacı Sil',
+            style: TextStyle(
+                fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
+        content: Text(
+          '"${ilac.ad}" adlı ilacı listeden kaldırmak istediğinize emin misiniz?',
+          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Vazgeç',
+                style: TextStyle(color: AppTheme.textSecondary)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Sil',
+                style: TextStyle(
+                    color: AppTheme.critical, fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+    if (onay == true) {
+      await IlacDepo.sil(id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('"${ilac.ad}" silindi'),
+          backgroundColor: AppTheme.critical,
+          behavior: SnackBarBehavior.floating,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          duration: const Duration(seconds: 2),
+        ));
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF3B6CF6),
-      body: CustomScrollView(
-        slivers: [
-          SliverToBoxAdapter(child: _buildUstBaslik()),
-          SliverToBoxAdapter(
-            child: Container(
-              color: AppTheme.background,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildOzetKartlar(),
-                  _buildIlaclarBaslik(),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
-                    child: Column(
-                      children: ilaclar
-                          .map((ilac) => _IlacKarti(
-                                ilac: ilac,
-                                onAl: ilac.durum == IlacDurumu.bekliyor
-                                    ? () => _ilacAl(ilac.id)
-                                    : null,
-                                onDetay: () => _detayGoster(ilac),
-                              ))
-                          .toList(),
-                    ),
+      backgroundColor: AppTheme.background,
+      body: Stack(
+        children: [
+          const Positioned(
+            top: 0, left: 0, right: 0,
+            height: 320,
+            child: ColoredBox(color: Color(0xFF3B6CF6)),
+          ),
+          CustomScrollView(
+            slivers: [
+              SliverToBoxAdapter(child: _buildUstBaslik()),
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: Container(
+                  color: AppTheme.background,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildOzetKartlar(),
+                      _buildIlaclarBaslik(),
+                      if (ilaclar.isEmpty)
+                        const _BosIlacDurumu()
+                      else
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
+                          child: Column(
+                            children: ilaclar
+                                .map((ilac) => Dismissible(
+                                      key: ValueKey(ilac.id),
+                                      direction: DismissDirection.endToStart,
+                                      confirmDismiss: (_) async {
+                                        await _ilacSil(ilac.id);
+                                        return false;
+                                      },
+                                      background: Container(
+                                        margin: const EdgeInsets.only(bottom: 12),
+                                        decoration: BoxDecoration(
+                                          color: AppTheme.critical.withValues(alpha: 0.12),
+                                          borderRadius: BorderRadius.circular(16),
+                                        ),
+                                        alignment: Alignment.centerRight,
+                                        padding: const EdgeInsets.only(right: 20),
+                                        child: const Icon(
+                                            Icons.delete_outline_rounded,
+                                            color: AppTheme.critical,
+                                            size: 24),
+                                      ),
+                                      child: IlacKarti(
+                                        ilac: ilac,
+                                        onAl: ilac.durum == IlacDurumu.bekliyor
+                                            ? () => _ilacAl(ilac.id)
+                                            : null,
+                                        onDetay: () => _detayGoster(ilac),
+                                      ),
+                                    ))
+                                .toList(),
+                          ),
+                        ),
+                    ],
                   ),
-                ],
+                ),
               ),
-            ),
+            ],
           ),
         ],
-      ),
+      )
     );
   }
 
@@ -222,7 +304,11 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const Spacer(),
           GestureDetector(
-            onTap: () {},
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (_) => const TumIlaclarScreen()),
+            ),
             child: Container(
               padding:
                   const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -250,7 +336,7 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _IlacDetaySheet(ilac: ilac),
+      builder: (_) => IlacDetaySheet(ilac: ilac),
     );
   }
 
@@ -488,12 +574,13 @@ class _BildirimButonu extends StatelessWidget {
 
 // ─── İLAÇ KARTI (RENK SİSTEMLİ) ─────────────────────────────────────────────
 
-class _IlacKarti extends StatelessWidget {
+class IlacKarti extends StatelessWidget {
   final Ilac ilac;
   final VoidCallback? onAl;
   final VoidCallback onDetay;
 
-  const _IlacKarti({
+  const IlacKarti({
+    super.key,
     required this.ilac,
     this.onAl,
     required this.onDetay,
@@ -884,7 +971,6 @@ class _StokBolumu extends StatelessWidget {
   const _StokBolumu({required this.ilac});
 
   Color get _progressRenk {
-    if (ilac.stokOrani <= 0.0) return AppTheme.critical;
     if (ilac.stokOrani <= 0.2) return AppTheme.critical;
     if (ilac.stokOrani <= 0.35) return AppTheme.warning;
     return AppTheme.primary;
@@ -1009,9 +1095,9 @@ class _StokBolumu extends StatelessWidget {
 
 // ─── İLAÇ DETAY SAYFASI ──────────────────────────────────────────────────────
 
-class _IlacDetaySheet extends StatelessWidget {
+class IlacDetaySheet extends StatelessWidget {
   final Ilac ilac;
-  const _IlacDetaySheet({required this.ilac});
+  const IlacDetaySheet({super.key, required this.ilac});
 
   @override
   Widget build(BuildContext context) {
@@ -1413,6 +1499,61 @@ class _BildirimSheet extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+// ─── BOŞ İLAÇ DURUMU ─────────────────────────────────────────────────────────
+
+class _BosIlacDurumu extends StatelessWidget {
+  const _BosIlacDurumu();
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      child: Padding(
+      padding: const EdgeInsets.fromLTRB(24, 72, 24, 100),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            width: 80,
+            height: 80,
+            decoration: BoxDecoration(
+              color: AppTheme.primaryLight,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.medication_outlined,
+              color: AppTheme.primary,
+              size: 36,
+            ),
+          ),
+          const SizedBox(height: 20),
+          const Text(
+            'Henüz ilaç eklemedin',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.textPrimary,
+              letterSpacing: -0.3,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'İlaçların burada görünecek.\nAlt menüden "İlaç Ekle"ye dokun.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 14,
+              color: AppTheme.textSecondary,
+              height: 1.5,
+            ),
+          ),
+        ],
+      ),
+    ));
   }
 }
 

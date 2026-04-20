@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:permission_handler/permission_handler.dart';
+import '../models/medicine.dart';
+import '../services/ilac_depo.dart';
 import '../theme.dart';
 
 // ─── VERİTABANI ──────────────────────────────────────────────────────────────
@@ -515,7 +517,7 @@ class _KoseFrameCizici extends CustomPainter {
 
     void drawCorner(List<Offset> pts) {
       final path = Path()..moveTo(pts[0].dx, pts[0].dy);
-      for (int i = 1; i < pts.length; i++) path.lineTo(pts[i].dx, pts[i].dy);
+      for (int i = 1; i < pts.length; i++) { path.lineTo(pts[i].dx, pts[i].dy); }
       canvas.drawPath(path, glow);
       canvas.drawPath(path, paint);
     }
@@ -708,72 +710,61 @@ class _AltPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.of(context).padding.bottom;
-    return GestureDetector(
-      // Aşağı kaydırınca panel kapanır (ana nav'a döner)
-      onVerticalDragEnd: (details) {
-        if (details.primaryVelocity != null &&
-            details.primaryVelocity! > 300) {
-          // hızlı aşağı swipe — isteğe bağlı aksiyon buraya eklenebilir
-        }
-      },
-      child: Container(
-        decoration: const BoxDecoration(
-          color: AppTheme.background,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        padding: EdgeInsets.fromLTRB(20, 10, 20, bottomInset + 8),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Çekiş çubuğu
-            Center(
-              child: Container(
-                width: 36,
-                height: 3,
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppTheme.background,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      padding: EdgeInsets.fromLTRB(20, 10, 20, bottomInset + 8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 36,
+              height: 3,
+              decoration: BoxDecoration(
+                  color: AppTheme.divider,
+                  borderRadius: BorderRadius.circular(2)),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              const Text('İpuçları',
+                  style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.textPrimary)),
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                 decoration: BoxDecoration(
-                    color: AppTheme.divider,
-                    borderRadius: BorderRadius.circular(2)),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                const Text('İpuçları',
-                    style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: AppTheme.textPrimary)),
-                const SizedBox(width: 6),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 7, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: AppTheme.primaryLight,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: const Text('3',
-                      style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.primary)),
+                  color: AppTheme.primaryLight,
+                  borderRadius: BorderRadius.circular(20),
                 ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            _IpucuSatiri(
-                ikon: Icons.qr_code_rounded,
-                metin: 'Kutudaki QR veya barkodu okutun'),
-            const SizedBox(height: 6),
-            _IpucuSatiri(
-                ikon: Icons.light_mode_outlined,
-                metin: 'Işık yetersizse flaşı kullanın'),
-            const SizedBox(height: 6),
-            _IpucuSatiri(
-                ikon: Icons.keyboard_outlined,
-                metin: 'Okutamazsanız kodu elle girin'),
-          ],
-        ),
+                child: const Text('3',
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.primary)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _IpucuSatiri(
+              ikon: Icons.qr_code_rounded,
+              metin: 'Kutudaki QR veya barkodu okutun'),
+          const SizedBox(height: 6),
+          _IpucuSatiri(
+              ikon: Icons.light_mode_outlined,
+              metin: 'Işık yetersizse flaşı kullanın'),
+          const SizedBox(height: 6),
+          _IpucuSatiri(
+              ikon: Icons.keyboard_outlined,
+              metin: 'Okutamazsanız kodu elle girin'),
+        ],
       ),
     );
   }
@@ -1236,6 +1227,16 @@ class _QrManuelModalState extends State<_QrManuelModal> {
 
 // ─── DOZ AYARLARI SAYFASI ─────────────────────────────────────────────────────
 
+const _dozRenkleri = [
+  AppTheme.primary,
+  AppTheme.success,
+  AppTheme.warning,
+  Color(0xFF8B2FE8),
+  AppTheme.critical,
+  Color(0xFF00BCD4),
+  Color(0xFFFF6B6B),
+];
+
 class DozAyarlariSayfasi extends StatefulWidget {
   final Map<String, String>? ilacBilgisi;
   final VoidCallback onKaydet;
@@ -1275,7 +1276,6 @@ class _DozAyarlariSayfasiState extends State<DozAyarlariSayfasi> {
       _adetCtrl.text = b['adet'] ?? '';
       _gunlukDoz = b['kullanim'] ?? 'Günde 1x';
       _kullanimSekli = b['sekil'] ?? 'Tok karna';
-      // Otomatik zaman ekle
       final zamanStr = b['zaman'] ?? '';
       for (final z in zamanStr.split(',')) {
         final isim = z.trim();
@@ -1308,6 +1308,61 @@ class _DozAyarlariSayfasiState extends State<DozAyarlariSayfasi> {
     _dozCtrl.dispose();
     _adetCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _kaydetVeKapat() async {
+    final ad = _adCtrl.text.trim();
+    if (ad.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('İlaç adı boş olamaz'),
+        backgroundColor: AppTheme.critical,
+      ));
+      return;
+    }
+
+    final adet = int.tryParse(_adetCtrl.text.trim()) ?? 30;
+    final ilkSaat = _alimZamanlari.first.saat;
+    final saatStr =
+        '${ilkSaat.hour.toString().padLeft(2, '0')}:${ilkSaat.minute.toString().padLeft(2, '0')}';
+
+    final renkIdx = IlacDepo.ilaclar.value.length % _dozRenkleri.length;
+    final renk = _dozRenkleri[renkIdx];
+
+    KullanimZamani zamanEnum;
+    final h = ilkSaat.hour;
+    if (h >= 6 && h < 12) {
+      zamanEnum = KullanimZamani.sabah;
+    } else if (h >= 12 && h < 17) {
+      zamanEnum = KullanimZamani.ogle;
+    } else if (h >= 17 && h < 21) {
+      zamanEnum = KullanimZamani.aksam;
+    } else {
+      zamanEnum = KullanimZamani.gece;
+    }
+
+    const tur = IlacTuru.tablet;
+
+    final kullanimBilgisi =
+        '$_gunlukDoz · $_kullanimSekli';
+
+    final yeniIlac = Ilac(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      ad: ad,
+      doz: _dozCtrl.text.trim().isEmpty ? '-' : _dozCtrl.text.trim(),
+      saat: saatStr,
+      durum: IlacDurumu.bekliyor,
+      tur: tur,
+      renk: renk,
+      not: _kullanimSekli,
+      kalanAdet: adet,
+      toplamAdet: adet,
+      kullanimBilgisi: kullanimBilgisi,
+      zaman: zamanEnum,
+      birim: 'tablet',
+    );
+
+    await IlacDepo.ekle(yeniIlac);
+    widget.onKaydet();
   }
 
   void _zamanEkle() {
@@ -1343,7 +1398,6 @@ class _DozAyarlariSayfasiState extends State<DozAyarlariSayfasi> {
       initialDate: _baslangicTarihi,
       firstDate: DateTime.now(),
       lastDate: DateTime.now().add(const Duration(days: 365)),
-      locale: const Locale('tr'),
     );
     if (picked != null) setState(() => _baslangicTarihi = picked);
   }
@@ -1424,7 +1478,6 @@ class _DozAyarlariSayfasiState extends State<DozAyarlariSayfasi> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // İlaç temel bilgileri
                   _BolumBaslik('İlaç Bilgileri',
                       ikon: Icons.medication_outlined),
                   const SizedBox(height: 12),
@@ -1561,9 +1614,8 @@ class _DozAyarlariSayfasiState extends State<DozAyarlariSayfasi> {
                   ),
 
                   const SizedBox(height: 32),
-                  // Kaydet Butonu
                   GestureDetector(
-                    onTap: widget.onKaydet,
+                    onTap: _kaydetVeKapat,
                     child: Container(
                       width: double.infinity,
                       padding: const EdgeInsets.symmetric(vertical: 16),
