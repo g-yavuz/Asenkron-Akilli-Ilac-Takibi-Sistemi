@@ -206,7 +206,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     const SizedBox(height: 4),
                     const Text(
-                      'Ahmet Yılmaz',
+                      'Can Yaşa',
                       style: TextStyle(
                         fontSize: 28,
                         fontWeight: FontWeight.w800,

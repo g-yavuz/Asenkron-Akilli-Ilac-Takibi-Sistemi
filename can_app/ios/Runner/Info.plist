@@ -47,6 +47,12 @@
 	<string>Yakınındaki eczaneleri göstermek için konumunuza ihtiyaç duyuyoruz.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Yakınındaki eczaneleri göstermek için konumunuza ihtiyaç duyuyoruz.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_dartobservatory._tcp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Flutter debug araçları için yerel ağ erişimi gerekiyor.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>

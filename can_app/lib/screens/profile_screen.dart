@@ -86,7 +86,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 const SizedBox(width: 16),
                 const Expanded(
                   child: Text(
-                    'Ahmet Yılmaz',
+                    'Can Yaşa',
                     style: TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.w700,
@@ -322,7 +322,7 @@ class HastaBilgileriSayfasi extends StatefulWidget {
 class _HastaBilgileriSayfasiState extends State<HastaBilgileriSayfasi> {
   bool _editMode = false;
 
-  final _adController = TextEditingController(text: 'Ahmet Yılmaz');
+  final _adController = TextEditingController(text: 'Can Yaşa');
   final _emailController = TextEditingController(text: 'ahmet.yilmaz@mail.com');
   final _telefonController = TextEditingController(text: '0532 000 00 00');
   final _dogumController = TextEditingController(text: '15.03.1985');
