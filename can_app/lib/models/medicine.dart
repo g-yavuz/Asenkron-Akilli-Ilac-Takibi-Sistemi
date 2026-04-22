@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../theme.dart';
 
 enum IlacDurumu { alindi, bekliyor, atildi, yakinda }
 
