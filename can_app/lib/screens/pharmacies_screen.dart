@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
@@ -7,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../theme.dart';
+
 
 class GercekEczane {
   final String id;
@@ -111,7 +113,11 @@ class _PharmaciesScreenState extends State<PharmaciesScreen> {
       );
 
       final konum = LatLng(pos.latitude, pos.longitude);
-      setState(() => _konumum = konum);
+      // Haritayı hemen göster, eczaneler arka planda yüklensin
+      setState(() {
+        _konumum = konum;
+        _yukleniyor = true;
+      });
       await _eczaneleriGetir(konum);
     } catch (e) {
       setState(() {
@@ -122,50 +128,52 @@ class _PharmaciesScreenState extends State<PharmaciesScreen> {
   }
 
   Future<void> _eczaneleriGetir(LatLng merkez) async {
-    const yariCap = 20000;
-    final query = '''
-[out:json][timeout:30];
-(
-  node["amenity"="pharmacy"](around:$yariCap,${merkez.latitude},${merkez.longitude});
-  way["amenity"="pharmacy"](around:$yariCap,${merkez.latitude},${merkez.longitude});
-  node["amenity"="pharmacy"]["opening_hours"="24/7"](around:$yariCap,${merkez.latitude},${merkez.longitude});
-  node["amenity"="pharmacy"]["dispensing:emergency"="yes"](around:$yariCap,${merkez.latitude},${merkez.longitude});
-);
-out center tags;
-''';
+    // Sadece node (way yok), 3km, max 30 sonuç — en hızlı sorgu
+    final query =
+        '[out:json][timeout:55];'
+        'node["amenity"="pharmacy"]'
+        '(around:5000,${merkez.latitude},${merkez.longitude});'
+        'out qt 50;';
+
+    http.Response? resp;
 
     try {
-      final resp = await http.post(
-        Uri.parse('https://overpass-api.de/api/interpreter'),
-        body: query,
+      final uri = Uri.https(
+        'overpass-api.de',
+        '/api/interpreter',
+        {'data': query},
       );
+      // Dart'ın default User-Agent'ı Overpass tarafından bloklanıyor
+      resp = await http.get(uri, headers: {
+        'User-Agent': 'AsenkronIlacApp/1.0',
+      }).timeout(const Duration(seconds: 60));
+    } catch (e) {
+      setState(() {
+        _hata = 'Sunucuya ulaşılamadı.\n${e.runtimeType}';
+        _yukleniyor = false;
+      });
+      return;
+    }
 
-      if (resp.statusCode != 200) {
-        setState(() {
-          _hata = 'Eczane verisi alınamadı.';
-          _yukleniyor = false;
-        });
-        return;
-      }
+    if (resp.statusCode != 200) {
+      setState(() {
+        _hata = 'Sunucu hatası: HTTP ${resp!.statusCode}';
+        _yukleniyor = false;
+      });
+      return;
+    }
 
+    try {
       final data = jsonDecode(utf8.decode(resp.bodyBytes));
       final elements = data['elements'] as List;
 
       final List<GercekEczane> liste = [];
       for (final el in elements) {
         final tags = el['tags'] as Map<String, dynamic>? ?? {};
-        double lat, lon;
-        if (el['type'] == 'way') {
-          lat = (el['center']['lat'] as num).toDouble();
-          lon = (el['center']['lon'] as num).toDouble();
-        } else {
-          lat = (el['lat'] as num).toDouble();
-          lon = (el['lon'] as num).toDouble();
-        }
+        final double lat = (el['lat'] as num).toDouble();
+        final double lon = (el['lon'] as num).toDouble();
 
-        final String ad = tags['name'] ??
-            tags['name:tr'] ??
-            'Eczane';
+        final String ad = tags['name'] ?? tags['name:tr'] ?? 'Eczane';
         final String adres = [
           tags['addr:street'],
           tags['addr:housenumber'],
@@ -176,7 +184,7 @@ out center tags;
 
         final mesafe = _haversine(merkez.latitude, merkez.longitude, lat, lon);
         final acik = _acikMi(oh);
-        final nobetci = _nobetciMi(oh, ad, tags);
+        final nobetci = _nobetciMiOsm(oh, ad, tags);
 
         liste.add(GercekEczane(
           id: el['id'].toString(),
@@ -194,23 +202,43 @@ out center tags;
 
       liste.sort((a, b) => a.mesafe.compareTo(b.mesafe));
 
-      // OSM'de nöbetçi bilgisi yoksa: gece saatinde açık olan tek eczane muhtemelen nöbetçidir
-      final now = DateTime.now();
-      final gece = now.hour >= 20 || now.hour < 8;
-      if (gece && liste.every((e) => !e.nobetci)) {
-        final aciklar = liste.where((e) => e.acik).toList();
-        for (final e in aciklar) {
-          e.nobetci = true;
-        }
-      }
-
+      // Önce listeyi göster, ardından nöbetçi verisini arka planda ekle
       setState(() {
         _eczaneler = liste;
         _yukleniyor = false;
       });
+
+      // Nominatim → şehir adı → eczaneler.gen.tr nöbetçi listesi
+      final sehir = await _sehirAl(merkez);
+      final nobetciler = sehir != null ? await _nobetcileriGetirWeb(sehir) : <String>[];
+
+      if (nobetciler.isNotEmpty) {
+        // Gerçek API verisiyle eşleştir
+        bool degisti = false;
+        for (final e in liste) {
+          final eslesen = nobetciler.any((n) => _isimBenzer(e.ad, n));
+          if (eslesen != e.nobetci) {
+            e.nobetci = eslesen;
+            degisti = true;
+          }
+        }
+        if (degisti && mounted) setState(() {});
+      } else {
+        // API yoksa gece heuristic: açık olan tek eczane muhtemelen nöbetçi
+        final now = DateTime.now();
+        final gece = now.hour >= 20 || now.hour < 8;
+        if (gece && liste.every((e) => !e.nobetci)) {
+          bool degisti = false;
+          for (final e in liste.where((e) => e.acik)) {
+            e.nobetci = true;
+            degisti = true;
+          }
+          if (degisti && mounted) setState(() {});
+        }
+      }
     } catch (e) {
       setState(() {
-        _hata = 'Veri yüklenirken hata: $e';
+        _hata = 'Veri işlenirken hata: $e';
         _yukleniyor = false;
       });
     }
@@ -289,19 +317,109 @@ out center tags;
     return simdiDk >= acilisDk && simdiDk < kapanisDk;
   }
 
-  bool _nobetciMi(String oh, String ad, Map<String, dynamic> tags) {
-    // 1. 24 saat açık → nöbetçi
+  // ── OSM tag kontrolü (statik, hızlı) ───────────────────────────────────────
+  bool _nobetciMiOsm(String oh, String ad, Map<String, dynamic> tags) {
     if (oh.contains('24/7')) return true;
-    // 2. İsim içinde nöbetçi geçiyorsa
     final adLower = ad.toLowerCase();
     if (adLower.contains('nöbet') || adLower.contains('nobet')) return true;
-    // 3. OSM dispensing:emergency veya emergency:prescription tag'i
     if (tags['dispensing:emergency'] == 'yes') return true;
     if (tags['emergency'] == 'yes') return true;
-    // 4. description veya note içinde nöbet geçiyorsa
     final desc = ((tags['description'] ?? '') + (tags['note'] ?? '')).toLowerCase();
     if (desc.contains('nöbet') || desc.contains('nobet')) return true;
     return false;
+  }
+
+  // ── Nominatim: koordinattan şehir adı al ────────────────────────────────────
+  Future<String?> _sehirAl(LatLng konum) async {
+    try {
+      final uri = Uri.https(
+        'nominatim.openstreetmap.org',
+        '/reverse',
+        {
+          'lat': konum.latitude.toString(),
+          'lon': konum.longitude.toString(),
+          'format': 'json',
+          'accept-language': 'tr',
+          'zoom': '10',
+        },
+      );
+      final resp = await http.get(uri, headers: {
+        'User-Agent': 'AsenkronIlacApp/1.0',
+      }).timeout(const Duration(seconds: 10));
+      if (resp.statusCode != 200) return null;
+      final data = jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
+      final address = data['address'] as Map<String, dynamic>?;
+      if (address == null) return null;
+      // Türkiye için: province > state > city > county
+      return address['province'] as String? ??
+          address['state'] as String? ??
+          address['city'] as String? ??
+          address['county'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // ── eczaneler.gen.tr: güncel nöbetçi listesi çek (ücretsiz, kayıtsız) ────────
+  Future<List<String>> _nobetcileriGetirWeb(String sehir) async {
+    try {
+      final slug = _turkceSlug(sehir);
+      final uri = Uri.https('www.eczaneler.gen.tr', '/nobetci-$slug');
+      final resp = await http.get(uri, headers: {
+        'User-Agent':
+            'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'tr-TR,tr;q=0.9',
+      }).timeout(const Duration(seconds: 15));
+      if (resp.statusCode != 200) return [];
+
+      final html = utf8.decode(resp.bodyBytes, allowMalformed: true);
+      // Eczane adları: <span class="isim">Eczane Adı</span>
+      final regex = RegExp(r'<span class="isim">([^<]+)</span>');
+      return regex
+          .allMatches(html)
+          .map((m) => m.group(1)!.trim().toLowerCase())
+          .where((s) => s.isNotEmpty)
+          .toSet()
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  // Türkçe karakterleri URL slug'a dönüştür: "İstanbul İl" → "istanbul"
+  String _turkceSlug(String s) {
+    return s
+        .replaceAll('İ', 'i')
+        .replaceAll('Ğ', 'g')
+        .replaceAll('Ü', 'u')
+        .replaceAll('Ş', 's')
+        .replaceAll('Ö', 'o')
+        .replaceAll('Ç', 'c')
+        .toLowerCase()
+        .replaceAll('ı', 'i')
+        .replaceAll('ğ', 'g')
+        .replaceAll('ü', 'u')
+        .replaceAll('ş', 's')
+        .replaceAll('ö', 'o')
+        .replaceAll('ç', 'c')
+        .replaceAll(RegExp(r'\s*(ili?|province|il)\s*$'), '')
+        .trim()
+        .replaceAll(RegExp(r'\s+'), '-');
+  }
+
+  // Basit isim benzerliği: "eczane" kelimesi çıkarılıp içerme kontrolü
+  bool _isimBenzer(String osmAd, String nosyAd) {
+    String temizle(String s) => s
+        .toLowerCase()
+        .replaceAll('eczanesi', '')
+        .replaceAll('eczane', '')
+        .replaceAll(RegExp(r'[^a-zğüşıöç\s]'), '')
+        .trim();
+    final a = temizle(osmAd);
+    final b = temizle(nosyAd);
+    if (a.isEmpty || b.isEmpty) return false;
+    return a.contains(b) || b.contains(a);
   }
 
   void _araYol(GercekEczane e) async {
@@ -333,14 +451,44 @@ out center tags;
             _buildBaslik(),
             _buildArama(),
             _buildFiltreler(),
-            if (_yukleniyor)
+            if (_konumum == null && _yukleniyor)
               const Expanded(
-                  child: Center(child: CircularProgressIndicator()))
-            else if (_hata != null)
+                child: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      CircularProgressIndicator(),
+                      SizedBox(height: 16),
+                      Text('Konum alınıyor...',
+                          style: TextStyle(
+                              color: AppTheme.textSecondary, fontSize: 14)),
+                    ],
+                  ),
+                ),
+              )
+            else if (_konumum == null && _hata != null)
               Expanded(child: _buildHata())
             else ...[
               _buildHarita(),
-              Expanded(child: _buildEczaneListesi()),
+              if (_yukleniyor)
+                const Expanded(
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        CircularProgressIndicator(),
+                        SizedBox(height: 12),
+                        Text('Eczaneler yükleniyor...',
+                            style: TextStyle(
+                                color: AppTheme.textSecondary, fontSize: 13)),
+                      ],
+                    ),
+                  ),
+                )
+              else if (_hata != null)
+                Expanded(child: _buildHata())
+              else
+                Expanded(child: _buildEczaneListesi()),
             ],
           ],
         ),
@@ -608,24 +756,91 @@ out center tags;
   }
 
   Widget _buildHata() {
+    final eczaneHatasi = _hata!.contains('Eczane') ||
+        _hata!.contains('Timeout') ||
+        _hata!.contains('timeout') ||
+        _hata!.contains('TimeoutException');
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.location_off_rounded,
-                size: 48, color: AppTheme.textSecondary),
-            const SizedBox(height: 12),
-            Text(_hata!,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: AppTheme.textSecondary)),
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                color: AppTheme.criticalLight,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                eczaneHatasi
+                    ? Icons.cloud_off_rounded
+                    : Icons.location_off_rounded,
+                size: 30,
+                color: AppTheme.critical,
+              ),
+            ),
             const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: _konumAl,
-              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primary),
-              child: const Text('Tekrar Dene',
-                  style: TextStyle(color: Colors.white)),
+            Text(
+              eczaneHatasi ? 'Sunucuya ulaşılamadı' : 'Konum alınamadı',
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              eczaneHatasi
+                  ? 'Eczane veritabanına ulaşılamıyor.\nBir süre sonra tekrar deneyin.'
+                  : _hata!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                  fontSize: 13, color: AppTheme.textSecondary, height: 1.5),
+            ),
+            if (eczaneHatasi) ...[
+              const SizedBox(height: 8),
+              Text(
+                _hata!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    fontSize: 10,
+                    color: AppTheme.textSecondary,
+                    fontFamily: 'monospace'),
+              ),
+            ],
+            const SizedBox(height: 24),
+            GestureDetector(
+              onTap: _konumAl,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 28, vertical: 13),
+                decoration: BoxDecoration(
+                  color: AppTheme.primary,
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppTheme.primary.withValues(alpha: 0.3),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.refresh_rounded, color: Colors.white, size: 18),
+                    SizedBox(width: 8),
+                    Text('Tekrar Dene',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
             ),
           ],
         ),
